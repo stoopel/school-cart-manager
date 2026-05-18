@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 export default function LandingPage() {
@@ -30,6 +31,8 @@ export default function LandingPage() {
       border: 'rgba(245,158,11,0.3)',
     }
   ]
+
+  const [showDocs, setShowDocs] = useState(false)
 
   return (
     <div style={{
@@ -80,6 +83,97 @@ export default function LandingPage() {
           </Link>
         ))}
       </div>
+
+      <div style={{ marginTop: 60 }}>
+        <button 
+          onClick={() => setShowDocs(true)}
+          style={{
+            background: 'transparent',
+            border: '1px solid #475569',
+            color: '#cbd5e1',
+            padding: '10px 24px',
+            borderRadius: '20px',
+            cursor: 'pointer',
+            fontSize: '1rem',
+            fontFamily: 'inherit',
+            transition: 'all 0.2s'
+          }}
+          onMouseOver={e => { e.currentTarget.style.background = '#1e293b'; e.currentTarget.style.color = '#fff' }}
+          onMouseOut={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#cbd5e1' }}
+        >
+          📖 הוראות שימוש במערכת
+        </button>
+      </div>
+
+      {showDocs && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(2, 6, 23, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: 20
+        }} onClick={() => setShowDocs(false)}>
+          <div style={{
+            background: '#0f172a',
+            border: '1px solid #1e293b',
+            borderRadius: 24,
+            padding: '40px',
+            maxWidth: 800,
+            width: '100%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            position: 'relative',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+          }} onClick={e => e.stopPropagation()}>
+            <button 
+              onClick={() => setShowDocs(false)}
+              style={{
+                position: 'absolute', top: 24, left: 24,
+                background: 'transparent', border: 'none', color: '#94a3b8',
+                fontSize: '1.5rem', cursor: 'pointer'
+              }}
+            >✕</button>
+            
+            <h2 style={{ color: '#f8fafc', fontSize: '2rem', marginTop: 0, marginBottom: 8 }}>איך זה עובד?</h2>
+            <p style={{ color: '#94a3b8', marginBottom: 32 }}>מדריך קצר למשתמשי המערכת</p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <div style={{ background: '#1e293b', padding: 24, borderRadius: 16 }}>
+                <h3 style={{ color: '#22c55e', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>🛒</span> עמדת תלמידים (לקיחה והחזרה)
+                </h3>
+                <ul style={{ color: '#cbd5e1', paddingRight: 20, margin: 0, lineHeight: 1.6 }}>
+                  <li><strong>לקיחת מחשב:</strong> התלמיד ניגש לטאבלט שעל העגלה, בוחר "לקחתי מחשב", ומקליד את תעודת הזהות שלו. לאחר מכן הוא יכול לסרוק את ה-QR שעל המחשב או להקליד את מספרו כדי לשייך אותו אליו.</li>
+                  <li><strong>החזרת מחשב:</strong> התלמיד בוחר "החזרתי מחשב" וסורק שוב את ה-QR (או מקליד את המספר). המערכת מוודאת שהמחשב הוחזר ומזכירה לתלמיד באנימציה בולטת <strong>לחבר את המחשב לחשמל!</strong></li>
+                </ul>
+              </div>
+
+              <div style={{ background: '#1e293b', padding: 24, borderRadius: 16 }}>
+                <h3 style={{ color: '#6366f1', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>👨‍🏫</span> פורטל מורים (ניהול שיעור)
+                </h3>
+                <ul style={{ color: '#cbd5e1', paddingRight: 20, margin: 0, lineHeight: 1.6 }}>
+                  <li>המורה נכנס לפורטל, מתחבר, ויכול לפתוח שיעור חדש.</li>
+                  <li>במסך השיעור ניתן לראות בזמן אמת איזה תלמיד לקח איזה מחשב, ומי עדיין לא החזיר.</li>
+                  <li><strong>נעילת מסכים:</strong> בלחיצת כפתור אחת, המורה יכול לנעול את כל המסכים של התלמידים בכיתה כדי לרכז את תשומת הלב, ולשחרר אותם כשיסיים.</li>
+                </ul>
+              </div>
+
+              <div style={{ background: '#1e293b', padding: 24, borderRadius: 16 }}>
+                <h3 style={{ color: '#f59e0b', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>⚙️</span> ממשק ניהול
+                </h3>
+                <ul style={{ color: '#cbd5e1', paddingRight: 20, margin: 0, lineHeight: 1.6 }}>
+                  <li><strong>דאשבורד:</strong> תמונת מצב חיה של כל העגלות, כמות המחשבים הזמינים, ואילו מחשבים נמצאים עם סוללה חלשה (שכחו להטעין).</li>
+                  <li><strong>ניהול עגלות:</strong> יצירה ועריכה של עגלות ומחשבים. לכל עגלה ניתן לתת "שם תצוגה" שיופיע על המדבקות (למשל "כיתה ט1").</li>
+                  <li><strong>הדפסת מדבקות:</strong> המערכת מייצרת דפי מדבקות מוכנים להדפסה עם ברקודים לכל מחשב.</li>
+                  <li><strong>היסטוריית השאלות:</strong> תיעוד מלא של מי לקח איזה מחשב, מתי, ולכמה זמן, כולל אפשרות ייצוא ל-Excel.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

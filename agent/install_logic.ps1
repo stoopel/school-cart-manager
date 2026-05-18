@@ -1,4 +1,4 @@
-﻿$OutputEncoding = [System.Console]::OutputEncoding = [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Console]::OutputEncoding = [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
 Start-Transcript -Path "$PSScriptRoot\install_log.txt" -Append
 
 Write-Host "Looking for configuration file..." -ForegroundColor Cyan
@@ -20,7 +20,7 @@ if (-not $supaUrl -or -not $supaKey) {
     exit
 }
 
-$computerName = $env:COMPUTERNAME
+$computerName = [System.Net.Dns]::GetHostName()
 $cartName = ""
 $devNum = ""
 

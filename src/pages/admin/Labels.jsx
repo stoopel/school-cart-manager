@@ -33,7 +33,7 @@ export default function Labels() {
     win.document.write(`
       <html dir="rtl">
         <head>
-          <title>תוויות QR – ${selected?.name}</title>
+          <title>תוויות QR – ${selected?.display_name || selected?.name}</title>
           <style>
             * { box-sizing: border-box; margin: 0; padding: 0; }
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: white; margin: 0; }
@@ -114,7 +114,7 @@ export default function Labels() {
                   onClick={() => loadDevices(c)}
                   style={{ justifyContent: 'flex-start' }}
                 >
-                  🛒 {c.name}
+                  🛒 {c.display_name || c.name}
                 </button>
               ))}
             </div>
@@ -125,7 +125,7 @@ export default function Labels() {
         <div>
           {selected && (
             <div className="flex items-center justify-between mb-4">
-              <h3 style={{ fontWeight: 700 }}>תוויות ל{selected.name} ({devices.length} מחשבים)</h3>
+              <h3 style={{ fontWeight: 700 }}>תוויות ל{selected.display_name || selected.name} ({devices.length} מחשבים)</h3>
               <button className="btn btn-primary" onClick={handlePrint} disabled={loading || devices.length === 0}>
                 🖨️ הדפס
               </button>
@@ -157,7 +157,7 @@ export default function Labels() {
                       {schoolName}
                     </div>
                     <div className="device-info" style={{ fontSize: '1.1rem', fontWeight: 900, color: '#111', lineHeight: 1.2 }}>
-                      {selected?.name}<br/>מחשב {dev.device_number}
+                      {selected?.display_name || selected?.name}<br/>מחשב {dev.device_number}
                     </div>
                     {dev.asset_tag && (
                       <div className="asset-tag" style={{ fontSize: '0.7rem', color: '#666', marginTop: 4 }}>

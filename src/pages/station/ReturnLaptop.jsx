@@ -149,7 +149,7 @@ export default function ReturnLaptop({ cart, onDone }) {
             מחשב מס' {device?.device_number}
           </div>
           <div style={{ fontSize: '1rem', color: 'var(--station-muted)', marginBottom: 24 }}>
-            {cart?.name}
+            {cart?.display_name || cart?.name}
           </div>
 
           <div className="station-result-info" style={{ textAlign: 'right' }}>
@@ -178,7 +178,7 @@ export default function ReturnLaptop({ cart, onDone }) {
             <div className="station-result-icon">✅</div>
             <div className="station-result-name">הוחזר בהצלחה!</div>
             <div className="station-result-info">
-              <div>💻 מחשב מס' <strong>{device?.device_number}</strong> – {cart?.name}</div>
+              <div>💻 מחשב מס' <strong>{device?.device_number}</strong> – {cart?.display_name || cart?.name}</div>
               <div>👤 {loan?.students?.name}</div>
               <div>⏱️ משך שימוש: {duration(loan?.checkout_at)}</div>
             </div>

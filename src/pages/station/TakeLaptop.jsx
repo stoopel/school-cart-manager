@@ -41,14 +41,14 @@ export default function TakeLaptop({ cart, onDone }) {
     // Check if student already has active loan
     const { data: existing } = await supabase
       .from('device_loans')
-      .select('id, devices(device_number, carts(name))')
+      .select('id, devices(device_number, carts(name, display_name))')
       .eq('student_id', stu.id)
       .eq('status', 'active')
       .is('checkin_at', null)
       .single()
 
     if (existing) {
-      setErrorMsg(`יש לך מחשב מס' ${existing.devices?.device_number} מ${existing.devices?.carts?.name} שלא הוחזר. יש להחזירו לפני לקיחת מחשב חדש.`)
+      setErrorMsg(`יש לך מחשב מס' ${existing.devices?.device_number} מ${existing.devices?.carts?.display_name || existing.devices?.carts?.name} שלא הוחזר. יש להחזירו לפני לקיחת מחשב חדש.`)
       return
     }
 
@@ -216,7 +216,7 @@ export default function TakeLaptop({ cart, onDone }) {
             <div className="station-result-name">{result?.student?.name}</div>
             <div className="station-result-sub">נרשמת בהצלחה!</div>
             <div className="station-result-info">
-              <div>💻 מחשב מס' <strong>{result?.device?.device_number}</strong> – {cart?.name}</div>
+              <div>💻 מחשב מס' <strong>{result?.device?.device_number}</strong> – {cart?.display_name || cart?.name}</div>
               <div>🕐 {new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</div>
               <div style={{ marginTop: 8, color: '#fbbf24' }}>⚠️ זכור להחזיר בסוף השימוש!</div>
             </div>

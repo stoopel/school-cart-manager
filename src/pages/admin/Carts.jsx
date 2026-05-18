@@ -7,8 +7,9 @@ export default function Carts() {
   const [selectedCart, setSelectedCart] = useState(null)
   const [loading, setLoading]     = useState(true)
   const [showAddCart, setShowAddCart]   = useState(false)
+  const [showEditCart, setShowEditCart] = useState(false)
   const [showAddDevice, setShowAddDevice] = useState(false)
-  const [cartForm, setCartForm]   = useState({ name: '', location: '', total_devices: '' })
+  const [cartForm, setCartForm]   = useState({ id: '', name: '', display_name: '', location: '', total_devices: '' })
   const [deviceForm, setDeviceForm] = useState({ device_number: '', asset_tag: '' })
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
@@ -57,14 +58,41 @@ export default function Carts() {
     e.preventDefault(); setError(''); setSaving(true)
     const { error: err } = await supabase.from('carts').insert({
       name: cartForm.name.trim(),
+      display_name: cartForm.display_name.trim() || null,
       location: cartForm.location.trim(),
       total_devices: Number(cartForm.total_devices) || 0,
     })
     setSaving(false)
     if (err) { setError(err.message); return }
     setShowAddCart(false)
-    setCartForm({ name: '', location: '', total_devices: '' })
+    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '' })
     loadCarts()
+  }
+
+  async function editCart(e) {
+    e.preventDefault(); setError(''); setSaving(true)
+    const { error: err } = await supabase.from('carts').update({
+      display_name: cartForm.display_name.trim() || null,
+      location: cartForm.location.trim(),
+      total_devices: Number(cartForm.total_devices) || 0,
+    }).eq('id', cartForm.id)
+    
+    setSaving(false)
+    if (err) { setError(err.message); return }
+    setShowEditCart(false)
+    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '' })
+    loadCarts()
+  }
+
+  function openEditModal(cart) {
+    setCartForm({
+      id: cart.id,
+      name: cart.name,
+      display_name: cart.display_name || '',
+      location: cart.location || '',
+      total_devices: cart.total_devices || ''
+    })
+    setShowEditCart(true)
   }
 
   async function addDevice(e) {
@@ -122,8 +150,16 @@ export default function Carts() {
                   }}
                   onClick={() => setSelectedCart(cart)}
                 >
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>{cart.name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{cart.location}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ fontWeight: 700 }}>{cart.display_name || cart.name}</div>
+                    <button 
+                      className="btn btn-ghost btn-sm" 
+                      style={{ padding: '2px 6px', fontSize: '0.8rem', color: 'var(--text-muted)' }}
+                      onClick={(e) => { e.stopPropagation(); openEditModal(cart); }}
+                    >✏️</button>
+                  </div>
+                  {cart.display_name && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>שם מערכת: {cart.name}</div>}
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>{cart.location || 'אין מיקום'}</div>
                   <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
                     <span className="badge badge-success">{cart.available_devices ?? 0} זמין</span>
                     <span className="badge badge-warning">{cart.active_loans ?? 0} נלקח</span>
@@ -139,7 +175,7 @@ export default function Carts() {
           {selectedCart ? (
             <>
               <div className="flex items-center justify-between mb-4">
-                <h3 style={{ fontWeight: 700 }}>{selectedCart.name} – מחשבים</h3>
+                <h3 style={{ fontWeight: 700 }}>{selectedCart.display_name || selectedCart.name} – מחשבים</h3>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <a href={`/station/${selectedCart.id}`} target="_blank" className="btn btn-ghost btn-sm" title="פתח את מסך העגלה לטאבלט">🔗 פתח עמדה</a>
                   <button className="btn btn-primary btn-sm" onClick={() => setShowAddDevice(true)}>+ הוסף מחשב</button>
@@ -204,15 +240,19 @@ export default function Carts() {
             <form onSubmit={addCart}>
               {error && <div className="alert alert-danger">{error}</div>}
               <div className="form-group">
-                <label className="form-label">שם העגלה *</label>
+                <label className="form-label">שם מערכת * (לזיהוי ע"י Agent)</label>
                 <input className="form-input" value={cartForm.name} onChange={e => setCartForm(f => ({ ...f, name: e.target.value }))} required placeholder="עגלה א" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">שם תצוגה (למדבקות ולממשק)</label>
+                <input className="form-input" value={cartForm.display_name} onChange={e => setCartForm(f => ({ ...f, display_name: e.target.value }))} placeholder="כיתה ט1 (אופציונלי)" />
               </div>
               <div className="form-group">
                 <label className="form-label">מיקום</label>
                 <input className="form-input" value={cartForm.location} onChange={e => setCartForm(f => ({ ...f, location: e.target.value }))} placeholder="ספריה / קומה ב" />
               </div>
               <div className="form-group">
-                <label className="form-label">מספר מחשבים</label>
+                <label className="form-label">מספר מחשבים סך הכל</label>
                 <input className="form-input" type="number" value={cartForm.total_devices} onChange={e => setCartForm(f => ({ ...f, total_devices: e.target.value }))} placeholder="38" />
               </div>
               <div className="modal-footer">
@@ -224,12 +264,48 @@ export default function Carts() {
         </div>
       )}
 
+      {/* Edit Cart Modal */}
+      {showEditCart && (
+        <div className="modal-overlay" onClick={() => setShowEditCart(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">✏️ ערוך עגלה</h3>
+              <button className="modal-close" onClick={() => setShowEditCart(false)}>✕</button>
+            </div>
+            <form onSubmit={editCart}>
+              {error && <div className="alert alert-danger">{error}</div>}
+              <div className="form-group">
+                <label className="form-label">שם מערכת (לא ניתן לשינוי)</label>
+                <input className="form-input" value={cartForm.name} disabled style={{ background: '#f5f5f5', color: '#666' }} />
+                <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 4 }}>משמש את סקריפט ההתקנה לזיהוי המחשבים.</div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">שם תצוגה (למדבקות ולממשק)</label>
+                <input className="form-input" value={cartForm.display_name} onChange={e => setCartForm(f => ({ ...f, display_name: e.target.value }))} placeholder="כיתה ט1 (אופציונלי)" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">מיקום</label>
+                <input className="form-input" value={cartForm.location} onChange={e => setCartForm(f => ({ ...f, location: e.target.value }))} placeholder="ספריה / קומה ב" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">מספר מחשבים סך הכל</label>
+                <input className="form-input" type="number" value={cartForm.total_devices} onChange={e => setCartForm(f => ({ ...f, total_devices: e.target.value }))} placeholder="38" />
+              </div>
+              <div className="modal-footer">
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? '⏳...' : '✅ שמור שינויים'}</button>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowEditCart(false)}>ביטול</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Add Device Modal */}
       {showAddDevice && selectedCart && (
         <div className="modal-overlay" onClick={() => setShowAddDevice(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">➕ הוסף מחשב ל{selectedCart.name}</h3>
+              <h3 className="modal-title">➕ הוסף מחשב ל{selectedCart.display_name || selectedCart.name}</h3>
               <button className="modal-close" onClick={() => setShowAddDevice(false)}>✕</button>
             </div>
             <form onSubmit={addDevice}>

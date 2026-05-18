@@ -60,7 +60,7 @@ export default function StationHome() {
     <div className="station-root">
       {/* Header */}
       <div className="station-header">
-        <div className="station-school">🏫 {cart?.name ? `${cart.name}` : 'תחנת עגלה'}</div>
+        <div className="station-school">🏫 {cart ? (cart.display_name || cart.name) : 'תחנת עגלה'}</div>
         <div className="station-clock">
           <div className="station-time">{timeStr}</div>
           <div className="station-date">{dateStr}</div>

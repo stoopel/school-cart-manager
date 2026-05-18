@@ -24,7 +24,7 @@ export default function Loans() {
     let q = supabase.from('device_loans').select(`
       id, checkout_at, checkin_at, status, checkout_method, digital_login_at,
       students(name, national_id, class_name),
-      devices(device_number, carts(name))
+      devices(device_number, carts(name, display_name))
     `).order('checkout_at', { ascending: false }).limit(500)
 
     if (filter.status) q = q.eq('status', filter.status)
@@ -55,7 +55,7 @@ export default function Loans() {
       'שם תלמיד':    l.students?.name ?? '',
       'תעודת זהות':  l.students?.national_id ?? '',
       'כיתה':        l.students?.class_name ?? '',
-      'עגלה':        l.devices?.carts?.name ?? '',
+      'עגלה':        l.devices?.carts?.display_name || l.devices?.carts?.name || '',
       'מחשב':        l.devices?.device_number ?? '',
       'נלקח':        fmt(l.checkout_at),
       'הוחזר':       fmt(l.checkin_at),
@@ -121,7 +121,7 @@ export default function Loans() {
                   <tr key={l.id}>
                     <td style={{ fontWeight: 600 }}>{l.students?.name ?? '—'}</td>
                     <td><span className="badge badge-info">{l.students?.class_name ?? '—'}</span></td>
-                    <td>{l.devices?.carts?.name ?? '—'}</td>
+                    <td>{l.devices?.carts?.display_name || l.devices?.carts?.name || '—'}</td>
                     <td>מס' {l.devices?.device_number ?? '—'}</td>
                     <td className="text-muted">{fmt(l.checkout_at)}</td>
                     <td className="text-muted">{fmt(l.checkin_at)}</td>

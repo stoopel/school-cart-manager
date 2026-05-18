@@ -50,7 +50,7 @@ export default function Dashboard() {
 
         // מחשבים עם סוללה נמוכה (<30%) או לא מחוברים
         supabase.from('devices')
-          .select('id,device_number,asset_tag,battery_level,is_charging,last_seen,cart_id,carts(name)')
+          .select('id,device_number,asset_tag,battery_level,is_charging,last_seen,cart_id,carts(name,display_name)')
           .not('battery_level', 'is', null)
           .lt('battery_level', 30)
           .order('battery_level', { ascending: true })
@@ -250,7 +250,7 @@ export default function Dashboard() {
                 {lowBat.map(d => (
                   <tr key={d.id}>
                     <td style={{ fontWeight: 600 }}>מס' {d.device_number}</td>
-                    <td className="text-muted">{d.carts?.name || '—'}</td>
+                    <td className="text-muted">{d.carts?.display_name || d.carts?.name || '—'}</td>
                     <td style={{ minWidth: 160 }}>
                       <BatteryBar level={d.battery_level} charging={d.is_charging} />
                     </td>

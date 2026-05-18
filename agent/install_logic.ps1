@@ -1,4 +1,5 @@
 $OutputEncoding = [System.Console]::OutputEncoding = [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
+Start-Transcript -Path "$PSScriptRoot\install_log.txt" -Append
 
 Write-Host "מחפש קובץ הגדרות..." -ForegroundColor Cyan
 $configPath = Join-Path $PSScriptRoot "config.json"
@@ -173,3 +174,5 @@ Write-Host "=========================================" -ForegroundColor Green
 Write-Host "ההתקנה הסתיימה בהצלחה!" -ForegroundColor Green
 Write-Host "השירות פועל כעת ברקע והמחשב מוגדר ומחובר." -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
+
+Stop-Transcript

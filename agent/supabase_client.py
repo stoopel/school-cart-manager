@@ -8,7 +8,11 @@ from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    _DIR = os.path.dirname(sys.executable)
+else:
+    _DIR = os.path.dirname(os.path.abspath(__file__))
+
 with open(os.path.join(_DIR, "config.json"), encoding="utf-8") as f:
     _CFG = json.load(f)
 

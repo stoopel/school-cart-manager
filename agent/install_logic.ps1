@@ -119,55 +119,84 @@ try {
     exit
 }
 
-# 3. Save data to local config
+# 3. Create Local Installation Directory and Copy Files
+Write-Host ""
+Write-Host "Preparing local installation folder..." -ForegroundColor Cyan
+$localDir = "C:\CartAgent"
+if (-not (Test-Path $localDir)) {
+    New-Item -ItemType Directory -Path $localDir -Force | Out-Null
+}
+
+# Find NSSM on USB
+$sourceNssm = Join-Path $PSScriptRoot "nssm.exe"
+if (-not (Test-Path $sourceNssm)) {
+    $sourceNssm = Join-Path $PSScriptRoot "dist\nssm.exe"
+}
+
+if (-not (Test-Path $sourceNssm)) {
+    Write-Host "Downloading utility tool (NSSM)..." -ForegroundColor Yellow
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    try {
+        Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$PSScriptRoot\nssm.zip"
+        Expand-Archive "$PSScriptRoot\nssm.zip" -Force -DestinationPath "$PSScriptRoot\nssm_temp"
+        Copy-Item "$PSScriptRoot\nssm_temp\nssm-2.24\win64\nssm.exe" -Destination $PSScriptRoot
+        $sourceNssm = Join-Path $PSScriptRoot "nssm.exe"
+        Remove-Item "$PSScriptRoot\nssm.zip" -Force
+        Remove-Item "$PSScriptRoot\nssm_temp" -Recurse -Force
+    } catch {
+        Write-Host "[WARNING] NSSM download failed, checking if local version exists..." -ForegroundColor Yellow
+    }
+}
+
+# Find Executable on USB
+$sourceExe = Join-Path $PSScriptRoot "dist\cart_agent.exe"
+if (-not (Test-Path $sourceExe)) {
+    $sourceExe = Join-Path $PSScriptRoot "cart_agent.exe"
+}
+
+if (-not (Test-Path $sourceExe)) {
+    Write-Host "Error: cart_agent.exe not found on installation media. Please ensure build.bat was run first!" -ForegroundColor Red
+    exit
+}
+
+# Copy files locally
+Write-Host "Copying files to $localDir..." -ForegroundColor Cyan
+Copy-Item $sourceExe -Destination (Join-Path $localDir "cart_agent.exe") -Force
+if (Test-Path $sourceNssm) {
+    Copy-Item $sourceNssm -Destination (Join-Path $localDir "nssm.exe") -Force
+} else {
+    Write-Host "Error: nssm.exe not found and could not be downloaded." -ForegroundColor Red
+    exit
+}
+
+# Save data to local config
+$localConfigPath = Join-Path $localDir "config.json"
 $config.asset_tag = $assetTag
 $config.cart_name = $cartName
 $config | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding UTF8
+$config | ConvertTo-Json -Depth 10 | Set-Content $localConfigPath -Encoding UTF8
 Write-Host "[OK] Local configuration file updated." -ForegroundColor Green
 
 
 # 4. Register Windows Service
 Write-Host ""
 Write-Host "Installing system service (CartAgent)..." -ForegroundColor Cyan
-$nssmPath = Join-Path $PSScriptRoot "nssm.exe"
-if (-not (Test-Path $nssmPath)) {
-    $nssmPath = Join-Path $PSScriptRoot "dist\nssm.exe"
-}
-
-if (-not (Test-Path $nssmPath)) {
-    Write-Host "Downloading utility tool (NSSM)..." -ForegroundColor Yellow
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$PSScriptRoot\nssm.zip"
-    Expand-Archive "$PSScriptRoot\nssm.zip" -Force -DestinationPath "$PSScriptRoot\nssm_temp"
-    Copy-Item "$PSScriptRoot\nssm_temp\nssm-2.24\win64\nssm.exe" -Destination $PSScriptRoot
-    $nssmPath = Join-Path $PSScriptRoot "nssm.exe"
-    Remove-Item "$PSScriptRoot\nssm.zip" -Force
-    Remove-Item "$PSScriptRoot\nssm_temp" -Recurse -Force
-}
-
 $serviceName = "CartAgent"
-$exePath = Join-Path $PSScriptRoot "dist\cart_agent.exe"
-if (-not (Test-Path $exePath)) {
-    $exePath = Join-Path $PSScriptRoot "cart_agent.exe"
-}
-
-if (-not (Test-Path $exePath)) {
-    Write-Host "Error: cart_agent.exe not found. Please ensure build.bat was run first!" -ForegroundColor Red
-    exit
-}
+$localNssmPath = Join-Path $localDir "nssm.exe"
+$localExePath = Join-Path $localDir "cart_agent.exe"
 
 # Stop and remove service if exists
-& $nssmPath stop $serviceName 2>$null
-& $nssmPath remove $serviceName confirm 2>$null
+& $localNssmPath stop $serviceName 2>$null
+& $localNssmPath remove $serviceName confirm 2>$null
 
-# Reinstall
-& $nssmPath install $serviceName "`"$exePath`""
-& $nssmPath set $serviceName DisplayName "Cart Agent - Lock Screen"
-& $nssmPath set $serviceName Description "School Laptop Cart Manager - Lock Screen"
-& $nssmPath set $serviceName Start SERVICE_AUTO_START
-& $nssmPath set $serviceName AppDirectory "`"$(Split-Path $exePath)`""
+# Reinstall from local paths
+& $localNssmPath install $serviceName "`"$localExePath`""
+& $localNssmPath set $serviceName DisplayName "Cart Agent - Lock Screen"
+& $localNssmPath set $serviceName Description "School Laptop Cart Manager - Lock Screen"
+& $localNssmPath set $serviceName Start SERVICE_AUTO_START
+& $localNssmPath set $serviceName AppDirectory "`"$localDir`""
 
-& $nssmPath start $serviceName
+& $localNssmPath start $serviceName
 
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green

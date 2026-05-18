@@ -9,14 +9,19 @@ import Loans       from './pages/admin/Loans'
 import Labels      from './pages/admin/Labels'
 import StationHome from './pages/station/StationHome'
 import TeacherApp  from './pages/teacher/TeacherApp'
+import LandingPage from './pages/LandingPage'
+import AdminLogin  from './components/AdminLogin'
 import './index.css'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* ממשק ניהול */}
-        <Route path="/admin" element={<AdminLayout />}>
+        {/* עמוד ראשי (Landing Page) */}
+        <Route path="/" element={<LandingPage />} />
+
+        {/* ממשק ניהול (מוגן בסיסמה) */}
+        <Route path="/admin" element={<AdminLogin><AdminLayout /></AdminLogin>}>
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="students"  element={<Students />} />
@@ -35,7 +40,7 @@ export default function App() {
         <Route path="/teacher" element={<TeacherApp />} />
 
         {/* ברירת מחדל */}
-        <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   )

@@ -36,22 +36,44 @@ export default function Labels() {
           <title>תוויות QR – ${selected?.name}</title>
           <style>
             * { box-sizing: border-box; margin: 0; padding: 0; }
-            body { font-family: Arial, sans-serif; background: white; }
-            .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; padding: 8mm; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: white; margin: 0; }
+            .grid { 
+              display: grid; 
+              grid-template-columns: repeat(3, 70mm);
+              grid-template-rows: repeat(8, 35mm);
+              gap: 0; 
+              padding-top: 8.5mm; 
+              width: 210mm; 
+              margin: 0 auto;
+            }
+            /* Override inline styles from React */
             .label {
-              border: 1px solid #ccc; border-radius: 6px;
-              padding: 6px; text-align: center;
-              width: 48mm; height: 48mm;
-              display: flex; flex-direction: column;
-              align-items: center; justify-content: center; gap: 4px;
+              width: 70mm !important; 
+              height: 35mm !important;
+              border: none !important; 
+              border-radius: 0 !important;
+              padding: 2mm 3mm !important;
+              margin: 0 !important;
+              display: flex !important;
+              flex-direction: row !important;
+              align-items: center !important;
+              justify-content: space-between !important;
               page-break-inside: avoid;
             }
-            .school { font-size: 8px; font-weight: bold; color: #333; }
-            .device-info { font-size: 9px; font-weight: bold; color: #111; margin-top: 2px; }
-            img { width: 30mm; height: 30mm; }
+            .label-text {
+              display: flex !important;
+              flex-direction: column !important;
+              justify-content: center !important;
+              width: calc(100% - 28mm) !important;
+            }
+            .school { font-size: 11px !important; font-weight: bold; color: #333; margin-bottom: 3px; }
+            .device-info { font-size: 15px !important; font-weight: 900; color: #000; line-height: 1.2; }
+            .asset-tag { font-size: 10px !important; color: #666; margin-top: 2px; }
+            img { width: 28mm !important; height: 28mm !important; }
+            
             @media print {
-              @page { margin: 8mm; size: A4; }
-              .grid { padding: 0; gap: 3mm; }
+              @page { margin: 0; size: A4; }
+              html, body { width: 210mm; height: 297mm; }
             }
           </style>
         </head>
@@ -123,22 +145,27 @@ export default function Labels() {
                   className="label"
                   style={{
                     background: 'white', color: '#111',
-                    border: '1px solid #ccc', borderRadius: 8,
-                    padding: 12, textAlign: 'center',
-                    display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', gap: 6,
+                    border: '1px dashed #ccc', borderRadius: 4,
+                    padding: '8px 12px',
+                    display: 'flex', flexDirection: 'row',
+                    alignItems: 'center', justifyContent: 'space-between',
+                    minHeight: 100
                   }}
                 >
-                  <div className="school" style={{ fontSize: '0.7rem', fontWeight: 700, color: '#333' }}>
-                    {schoolName}
+                  <div className="label-text" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                    <div className="school" style={{ fontSize: '0.75rem', fontWeight: 700, color: '#333', marginBottom: 4 }}>
+                      {schoolName}
+                    </div>
+                    <div className="device-info" style={{ fontSize: '1.1rem', fontWeight: 900, color: '#111', lineHeight: 1.2 }}>
+                      {selected?.name}<br/>מחשב {dev.device_number}
+                    </div>
+                    {dev.asset_tag && (
+                      <div className="asset-tag" style={{ fontSize: '0.7rem', color: '#666', marginTop: 4 }}>
+                        {dev.asset_tag}
+                      </div>
+                    )}
                   </div>
-                  <img src={dev.qrDataUrl} alt={`QR מחשב ${dev.device_number}`} style={{ width: 100, height: 100 }} />
-                  <div className="device-info" style={{ fontSize: '0.85rem', fontWeight: 800, color: '#111' }}>
-                    {selected?.name} | מס' {dev.device_number}
-                  </div>
-                  {dev.asset_tag && (
-                    <div style={{ fontSize: '0.65rem', color: '#666' }}>{dev.asset_tag}</div>
-                  )}
+                  <img src={dev.qrDataUrl} alt={`QR`} style={{ width: 80, height: 80 }} />
                 </div>
               ))}
             </div>

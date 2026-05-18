@@ -1,4 +1,4 @@
-$OutputEncoding = [System.Console]::OutputEncoding = [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
+﻿$OutputEncoding = [System.Console]::OutputEncoding = [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
 Start-Transcript -Path "$PSScriptRoot\install_log.txt" -Append
 
 Write-Host "מחפש קובץ הגדרות..." -ForegroundColor Cyan

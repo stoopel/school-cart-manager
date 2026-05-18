@@ -6,11 +6,11 @@ echo ===========================================
 
 net session >nul 2>&1
 if %errorLevel% NEQ 0 (
-    echo נדרשות הרשאות אדמין! מבקש הרשאות...
+    echo Administrator privileges required! Requesting permissions...
     powershell -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
 
-echo הפעלת סקריפט התקנה חכם...
+echo Starting smart installation script...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install_logic.ps1"
 pause

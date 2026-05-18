@@ -27,7 +27,7 @@ $devNum = ""
 # Pattern matching (e.g. 440294-NewYellow25)
 if ($computerName -match '^(?:.*-)?(?:New|Old|Temp)?([A-Za-z]+)(\d+)$') {
     $cartName = $matches[1]
-    $devNum = $matches[2]
+    $devNum = ([int]$matches[2]).ToString()
     
     Write-Host ""
     Write-Host "--- Auto Detection ---" -ForegroundColor Cyan

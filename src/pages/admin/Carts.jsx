@@ -140,7 +140,10 @@ export default function Carts() {
             <>
               <div className="flex items-center justify-between mb-4">
                 <h3 style={{ fontWeight: 700 }}>{selectedCart.name} – מחשבים</h3>
-                <button className="btn btn-primary btn-sm" onClick={() => setShowAddDevice(true)}>+ הוסף מחשב</button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <a href={`/station/${selectedCart.id}`} target="_blank" className="btn btn-ghost btn-sm" title="פתח את מסך העגלה לטאבלט">🔗 פתח עמדה</a>
+                  <button className="btn btn-primary btn-sm" onClick={() => setShowAddDevice(true)}>+ הוסף מחשב</button>
+                </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
                 {devices.map(dev => (

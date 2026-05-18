@@ -1,0 +1,216 @@
+import { useState, useEffect, useRef } from 'react'
+import { Html5Qrcode } from 'html5-qrcode'
+import { supabase } from '../../lib/supabase'
+
+const STEPS = { SCAN: 'scan', CONFIRM: 'confirm', SUCCESS: 'success' }
+
+export default function ReturnLaptop({ cart, onDone }) {
+  const [step, setStep]         = useState(STEPS.SCAN)
+  const [scanMode, setScanMode] = useState('qr')
+  const [loan, setLoan]         = useState(null)
+  const [device, setDevice]     = useState(null)
+  const [errorMsg, setErrorMsg] = useState('')
+  const [devices, setDevices]   = useState([])
+  const scannerRef = useRef(null)
+
+  useEffect(() => { if (cart) loadDevices() }, [cart])
+
+  async function loadDevices() {
+    const { data } = await supabase.from('devices').select('*').eq('cart_id', cart.id).order('device_number')
+    setDevices(data ?? [])
+  }
+
+  // QR Scanner – מצלמה קדמית (facingMode: user) לטאבלט מורכב על קיר
+  useEffect(() => {
+    if (step !== STEPS.SCAN || scanMode !== 'qr') return
+    const qrCode = new Html5Qrcode('qr-reader-return')
+    scannerRef.current = qrCode
+    qrCode.start(
+      { facingMode: 'user' },
+      { fps: 10, qrbox: { width: 220, height: 220 } },
+      (decodedText) => {
+        qrCode.stop().catch(() => {})
+        scannerRef.current = null
+        onQRSuccess(decodedText)
+      },
+      () => {} // שגיאות סריקה – מתעלמים
+    ).catch(err => console.error('Camera error:', err))
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {})
+        scannerRef.current = null
+      }
+    }
+  }, [step, scanMode])
+
+  async function onQRSuccess(decodedText) {
+    await lookupDevice(decodedText)
+  }
+
+  async function lookupDevice(deviceIdOrNumber) {
+    setErrorMsg('')
+    const isUUID = /^[0-9a-f-]{36}$/i.test(deviceIdOrNumber)
+    let dev
+    if (isUUID) {
+      const { data } = await supabase.from('devices').select('*').eq('id', deviceIdOrNumber).eq('cart_id', cart.id).single()
+      dev = data
+    } else {
+      const { data } = await supabase.from('devices').select('*').eq('cart_id', cart.id).eq('device_number', Number(deviceIdOrNumber)).single()
+      dev = data
+    }
+
+    if (!dev) { setErrorMsg('מחשב לא נמצא בעגלה זו.'); return }
+
+    // Find active loan
+    const { data: activeLoan } = await supabase
+      .from('device_loans')
+      .select('*, students(name, class_name)')
+      .eq('device_id', dev.id)
+      .eq('status', 'active')
+      .is('checkin_at', null)
+      .single()
+
+    if (!activeLoan) {
+      setErrorMsg(`מחשב מס' ${dev.device_number} כבר מוחזר או לא נלקח.`)
+      return
+    }
+
+    setDevice(dev)
+    setLoan(activeLoan)
+    setStep(STEPS.CONFIRM)
+  }
+
+  async function confirmReturn() {
+    const { error } = await supabase
+      .from('device_loans')
+      .update({ checkin_at: new Date().toISOString(), status: 'returned', return_method: 'cart_station' })
+      .eq('id', loan.id)
+
+    if (error) { setErrorMsg('שגיאה בהחזרה. נסה שנית.'); return }
+    setStep(STEPS.SUCCESS)
+    setTimeout(() => onDone(), 4000)
+  }
+
+  function duration(from) {
+    const mins = Math.floor((Date.now() - new Date(from)) / 60000)
+    if (mins < 60) return `${mins} דקות`
+    return `${Math.floor(mins/60)} שעות ו-${mins%60} דקות`
+  }
+
+  // ─── STEP: SCAN ─────────────────────────────
+  if (step === STEPS.SCAN) return (
+    <div className="station-flow">
+      <div className="station-flow-header">
+        <button className="station-back-btn" onClick={onDone}>← חזרה</button>
+        <span className="station-flow-title">📤 החזרת מחשב</span>
+      </div>
+      <div className="station-flow-body">
+        <div className="flex gap-3">
+          <button className={`btn ${scanMode === 'qr' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setScanMode('qr')}>📷 סריקת QR</button>
+          <button className={`btn ${scanMode === 'number' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setScanMode('number')}>🔢 הקלדת מספר</button>
+        </div>
+
+        {errorMsg && <div className="station-error">{errorMsg}</div>}
+
+        {scanMode === 'qr' ? (
+          <div className="station-panel" style={{ maxWidth: 420 }}>
+            <div className="station-panel-title">סרוק את ה-QR Code על המחשב המוחזר</div>
+            <div className="station-qr-area">
+              <div id="qr-reader-return" />
+            </div>
+          </div>
+        ) : (
+          <div className="station-panel">
+            <div className="station-panel-title">בחר מספר מחשב להחזרה</div>
+            <div className="station-numgrid">
+              {devices.map(d => (
+                <button key={d.id} className="station-numkey" onClick={() => lookupDevice(String(d.device_number))}>
+                  {d.device_number}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  // ─── STEP: CONFIRM ───────────────────────────
+  if (step === STEPS.CONFIRM) return (
+    <div className="station-flow">
+      <div className="station-flow-header">
+        <button className="station-back-btn" onClick={() => { setStep(STEPS.SCAN); setLoan(null); setDevice(null); }}>← חזרה</button>
+        <span className="station-flow-title">אישור החזרה</span>
+      </div>
+      <div className="station-flow-body">
+        <div className="station-panel" style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '3rem', marginBottom: 12 }}>💻</div>
+          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--station-text)', marginBottom: 6 }}>
+            מחשב מס' {device?.device_number}
+          </div>
+          <div style={{ fontSize: '1rem', color: 'var(--station-muted)', marginBottom: 24 }}>
+            {cart?.name}
+          </div>
+
+          <div className="station-result-info" style={{ textAlign: 'right' }}>
+            <div>👤 <strong>{loan?.students?.name}</strong> – {loan?.students?.class_name}</div>
+            <div>🕐 נלקח ב-{new Date(loan?.checkout_at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</div>
+            <div>⏱️ משך: {duration(loan?.checkout_at)}</div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
+            <button className="btn btn-success btn-lg" onClick={confirmReturn}>✅ אשר החזרה</button>
+            <button className="btn btn-ghost btn-lg" onClick={() => { setStep(STEPS.SCAN); setLoan(null); setDevice(null); }}>ביטול</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  // ─── STEP: SUCCESS ───────────────────────────
+  if (step === STEPS.SUCCESS) return (
+    <div className="station-flow">
+      <div className="station-flow-body" style={{ gap: 16 }}>
+
+        {/* Success panel */}
+        <div className="station-panel">
+          <div className="station-result">
+            <div className="station-result-icon">✅</div>
+            <div className="station-result-name">הוחזר בהצלחה!</div>
+            <div className="station-result-info">
+              <div>💻 מחשב מס' <strong>{device?.device_number}</strong> – {cart?.name}</div>
+              <div>👤 {loan?.students?.name}</div>
+              <div>⏱️ משך שימוש: {duration(loan?.checkout_at)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Charging reminder – very prominent */}
+        <div style={{
+          background: 'linear-gradient(135deg, #f59e0b22, #f97316, #f97316, #f59e0b22)',
+          border: '3px solid #f97316',
+          borderRadius: 20,
+          padding: '28px 24px',
+          textAlign: 'center',
+          animation: 'pulse 2s infinite',
+        }}>
+          <div style={{ fontSize: '4rem', marginBottom: 8 }}>🔌</div>
+          <div style={{
+            fontSize: '1.8rem', fontWeight: 900,
+            color: '#fff', marginBottom: 8, lineHeight: 1.2,
+          }}>
+            חבר את המחשב לחשמל!
+          </div>
+          <div style={{ fontSize: '1.1rem', color: 'rgba(255,255,255,0.85)' }}>
+            אנא חבר את כבל הטעינה עכשיו לפני שתלך
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'center', fontSize: '0.9rem', color: 'var(--station-muted)', marginTop: 8 }}>
+          חוזר לתחנה בעוד מספר שניות...
+        </div>
+
+      </div>
+    </div>
+  )
+}

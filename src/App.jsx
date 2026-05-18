@@ -1,0 +1,42 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import AdminLayout from './layouts/AdminLayout'
+import Dashboard   from './pages/admin/Dashboard'
+import Students    from './pages/admin/Students'
+import Teachers    from './pages/admin/Teachers'
+import Lessons     from './pages/admin/Lessons'
+import Carts       from './pages/admin/Carts'
+import Loans       from './pages/admin/Loans'
+import Labels      from './pages/admin/Labels'
+import StationHome from './pages/station/StationHome'
+import TeacherApp  from './pages/teacher/TeacherApp'
+import './index.css'
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* ממשק ניהול */}
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="students"  element={<Students />} />
+          <Route path="teachers"  element={<Teachers />} />
+          <Route path="lessons"   element={<Lessons />} />
+          <Route path="carts"     element={<Carts />} />
+          <Route path="loans"     element={<Loans />} />
+          <Route path="labels"    element={<Labels />} />
+        </Route>
+
+        {/* תחנת עגלה – Kiosk */}
+        <Route path="/station/:cartId" element={<StationHome />} />
+        <Route path="/station"         element={<StationHome />} />
+
+        {/* פורטל מורים */}
+        <Route path="/teacher" element={<TeacherApp />} />
+
+        {/* ברירת מחדל */}
+        <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+      </Routes>
+    </BrowserRouter>
+  )
+}

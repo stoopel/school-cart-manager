@@ -1,0 +1,317 @@
+/* ================================================
+   Cart Station – Full-Screen Kiosk CSS
+   ================================================ */
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.88; transform: scale(1.01); }
+}
+
+:root {
+  --station-bg:      #0a0f1e;
+  --station-card:    #131c35;
+  --station-border:  rgba(99,102,241,0.2);
+  --station-accent:  #6366f1;
+  --station-success: #10b981;
+  --station-warning: #f59e0b;
+  --station-danger:  #ef4444;
+  --station-text:    #f1f5f9;
+  --station-muted:   #94a3b8;
+}
+
+.station-root {
+  min-height: 100vh;
+  background: var(--station-bg);
+  display: flex;
+  flex-direction: column;
+  direction: rtl;
+  font-family: 'Heebo', sans-serif;
+  user-select: none;
+}
+
+/* Header */
+.station-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 40px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--station-border);
+}
+
+.station-school {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--station-text);
+}
+
+.station-clock { text-align: left; }
+.station-time  { font-size: 2rem; font-weight: 800; color: var(--station-text); line-height: 1; }
+.station-date  { font-size: 0.85rem; color: var(--station-muted); margin-top: 2px; }
+
+/* Main */
+.station-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 40px;
+}
+
+.station-welcome { text-align: center; }
+.station-welcome h1 {
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: var(--station-text);
+  margin-bottom: 8px;
+}
+.station-welcome p {
+  font-size: 1.1rem;
+  color: var(--station-muted);
+}
+
+/* Action Buttons */
+.station-actions {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.station-btn {
+  width: 280px;
+  height: 220px;
+  border-radius: 24px;
+  border: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Heebo', sans-serif;
+}
+
+.station-btn-take {
+  background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(99,102,241,0.05));
+  border-color: rgba(99,102,241,0.4);
+}
+.station-btn-take:hover {
+  background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(99,102,241,0.15));
+  border-color: var(--station-accent);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(99,102,241,0.3);
+}
+
+.station-btn-return {
+  background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05));
+  border-color: rgba(16,185,129,0.4);
+}
+.station-btn-return:hover {
+  background: linear-gradient(135deg, rgba(16,185,129,0.3), rgba(16,185,129,0.15));
+  border-color: var(--station-success);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(16,185,129,0.3);
+}
+
+.station-btn-icon  { font-size: 3.5rem; }
+.station-btn-label { font-size: 1.4rem; font-weight: 800; color: var(--station-text); }
+.station-btn-sub   { font-size: 0.85rem; color: var(--station-muted); }
+
+/* Footer */
+.station-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 20px 40px;
+  background: rgba(255,255,255,0.02);
+  border-top: 1px solid var(--station-border);
+}
+
+.station-stat { text-align: center; }
+.station-stat-value { display: block; font-size: 2rem; font-weight: 800; }
+.station-stat-label { display: block; font-size: 0.75rem; color: var(--station-muted); }
+.station-stat-divider { width: 1px; height: 40px; background: var(--station-border); }
+
+/* ================================================
+   Take / Return Shared Styles
+   ================================================ */
+.station-flow {
+  min-height: 100vh;
+  background: var(--station-bg);
+  display: flex;
+  flex-direction: column;
+  direction: rtl;
+  font-family: 'Heebo', sans-serif;
+}
+
+.station-flow-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 40px;
+  border-bottom: 1px solid var(--station-border);
+}
+
+.station-back-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--station-border);
+  color: var(--station-muted);
+  border-radius: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-family: 'Heebo', sans-serif;
+  transition: all 0.2s;
+}
+.station-back-btn:hover { color: var(--station-text); background: rgba(255,255,255,0.1); }
+
+.station-flow-title { font-size: 1.3rem; font-weight: 700; color: var(--station-text); }
+
+.station-flow-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 28px;
+}
+
+.station-panel {
+  background: var(--station-card);
+  border: 1px solid var(--station-border);
+  border-radius: 24px;
+  padding: 40px;
+  width: 100%;
+  max-width: 520px;
+}
+
+.station-panel-title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--station-text);
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+/* ID Input */
+.station-id-input {
+  background: rgba(255,255,255,0.05);
+  border: 2px solid var(--station-border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--station-text);
+  text-align: center;
+  letter-spacing: 0.15em;
+  width: 100%;
+  font-family: 'Heebo', sans-serif;
+  transition: all 0.2s;
+}
+.station-id-input:focus {
+  outline: none;
+  border-color: var(--station-accent);
+  box-shadow: 0 0 0 4px rgba(99,102,241,0.2);
+}
+
+/* Keypad */
+.station-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.station-key {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--station-border);
+  border-radius: 12px;
+  padding: 18px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--station-text);
+  cursor: pointer;
+  font-family: 'Heebo', sans-serif;
+  transition: all 0.15s;
+  text-align: center;
+}
+.station-key:hover  { background: rgba(255,255,255,0.12); }
+.station-key:active { transform: scale(0.95); }
+.station-key.delete { color: var(--station-danger); }
+.station-key.confirm {
+  background: var(--station-accent);
+  border-color: var(--station-accent);
+  grid-column: span 2;
+}
+.station-key.confirm:hover { background: #4f46e5; }
+.station-key.confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Result screens */
+.station-result {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.station-result-icon { font-size: 4rem; margin-bottom: 16px; }
+.station-result-name { font-size: 2rem; font-weight: 900; color: var(--station-text); margin-bottom: 8px; }
+.station-result-sub  { font-size: 1rem; color: var(--station-muted); }
+.station-result-info {
+  margin-top: 20px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  padding: 16px;
+  font-size: 0.95rem;
+  color: var(--station-muted);
+  line-height: 1.8;
+}
+
+.station-error {
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 12px;
+  padding: 14px 20px;
+  color: #fca5a5;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+/* QR Scanner */
+.station-qr-area {
+  border: 2px dashed var(--station-border);
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+}
+.station-qr-area #qr-reader { width: 100% !important; }
+.station-qr-area #qr-reader video { border-radius: 14px; }
+
+/* Number grid */
+.station-numgrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.station-numkey {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--station-border);
+  border-radius: 10px;
+  padding: 16px 8px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--station-text);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  font-family: 'Heebo', sans-serif;
+}
+.station-numkey:hover  { background: rgba(99,102,241,0.2); border-color: var(--station-accent); }
+.station-numkey:active { transform: scale(0.95); }

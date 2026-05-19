@@ -3,7 +3,7 @@ supabase_client.py - v3
 פונקציות נוספות: שיעורים, מורים, סוללה, strikes
 """
 
-import requests, json, os, threading, time, logging
+import requests, json, os, sys, threading, time, logging
 from datetime import datetime
 
 log = logging.getLogger(__name__)

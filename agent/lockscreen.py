@@ -30,7 +30,7 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
         ("scanCode", wintypes.DWORD),
         ("flags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG))
+        ("dwExtraInfo", ctypes.c_size_t)
     ]
 
 _keyboard_hook = None
@@ -38,42 +38,53 @@ _callback_ptr = None
 
 def _low_level_keyboard_proc(nCode, wParam, lParam):
     if nCode >= 0:
-        vkCode = lParam.contents.vkCode
-        
-        # Whitelist of allowed keys to unlock the PC:
-        # - Backspace: 0x08
-        # - Enter: 0x0D
-        # - Escape: 0x1B
-        # - Shift: 0x10, LSHIFT: 0xA0, RSHIFT: 0xA1
-        # - Digits 0-9: 0x30 to 0x39
-        # - Letters A-Z (English/Hebrew keyboard keys): 0x41 to 0x5A
-        # - Numpad digits 0-9: 0x60 to 0x69
-        
-        is_allowed = (
-            vkCode == 0x08 or
-            vkCode == 0x0D or
-            vkCode == 0x1B or
-            vkCode in (0x10, 0xA0, 0xA1) or
-            (0x30 <= vkCode <= 0x39) or
-            (0x41 <= vkCode <= 0x5A) or
-            (0x60 <= vkCode <= 0x69)
-        )
-        
-        if not is_allowed:
-            return 1 # BLOCK all other keys (Alt, Win, Ctrl, Fn, F1-F12, etc.)
+        try:
+            kbd_struct = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+            vkCode = kbd_struct.vkCode
+            
+            # Whitelist of allowed keys to unlock the PC:
+            # - Backspace: 0x08
+            # - Enter: 0x0D
+            # - Escape: 0x1B
+            # - Shift: 0x10, LSHIFT: 0xA0, RSHIFT: 0xA1
+            # - Digits 0-9: 0x30 to 0x39
+            # - Letters A-Z (English/Hebrew keyboard keys): 0x41 to 0x5A
+            # - Numpad digits 0-9: 0x60 to 0x69
+            
+            is_allowed = (
+                vkCode == 0x08 or
+                vkCode == 0x0D or
+                vkCode == 0x1B or
+                vkCode in (0x10, 0xA0, 0xA1) or
+                (0x30 <= vkCode <= 0x39) or
+                (0x41 <= vkCode <= 0x5A) or
+                (0x60 <= vkCode <= 0x69)
+            )
+            
+            if not is_allowed:
+                return 1 # BLOCK all other keys (Alt, Win, Ctrl, Fn, F1-F12, etc.)
+        except Exception:
+            pass
             
     return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-# Keep reference to callback
-HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int, wintypes.WPARAM, ctypes.POINTER(KBDLLHOOKSTRUCT))
+# Keep reference to callback with proper 64-bit types
+HOOKPROC = ctypes.WINFUNCTYPE(wintypes.LPARAM, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+
+# Set Win32 argtypes/restype for full type safety on 64-bit systems
+user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
+user32.SetWindowsHookExW.restype = wintypes.HHOOK
+
+user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+user32.CallNextHookEx.restype = wintypes.LPARAM
 
 def install_keyboard_hook():
     global _keyboard_hook, _callback_ptr
     if _keyboard_hook is not None:
         return
     _callback_ptr = HOOKPROC(_low_level_keyboard_proc)
-    h_mod = kernel32.GetModuleHandleW(None)
-    _keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _callback_ptr, h_mod, 0)
+    # The third argument can be NULL for thread hooks or global LL hooks without DLL
+    _keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _callback_ptr, None, 0)
 
 def uninstall_keyboard_hook():
     global _keyboard_hook, _callback_ptr
@@ -89,6 +100,23 @@ def set_task_manager_enabled(enabled: bool):
         winreg.CloseKey(key)
     except Exception:
         pass
+
+def kill_explorer():
+    try:
+        subprocess.run(["taskkill", "/f", "/im", "explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+def start_explorer():
+    try:
+        res = subprocess.run(["tasklist", "/fi", "IMAGENAME eq explorer.exe"], capture_output=True, text=True)
+        if "explorer.exe" not in res.stdout:
+            subprocess.Popen("explorer.exe", shell=True)
+    except Exception:
+        try:
+            subprocess.Popen("explorer.exe", shell=True)
+        except Exception:
+            pass
 
 BG = "#0a0f1e"; BG_CARD = "#131929"; BG_INPUT = "#1e2840"
 ACCENT = "#3b82f6"; ACCENT_DARK = "#1d4ed8"
@@ -130,6 +158,7 @@ class LockScreen:
         r.focus_force()
         install_keyboard_hook()
         set_task_manager_enabled(False)
+        kill_explorer()
 
     # ── UI Build ──────────────────────────────────────────────
 
@@ -411,6 +440,7 @@ class LockScreen:
         set_task_manager_enabled(True)
         self.root.attributes("-topmost", False)
         self.root.withdraw()
+        start_explorer()
         if self.on_unlock:
             self.on_unlock()
 
@@ -420,6 +450,7 @@ class LockScreen:
         self.entered_id = ""
         install_keyboard_hook()
         set_task_manager_enabled(False)
+        kill_explorer()
         def _do():
             self.lbl_display.config(text="")
             self.root.deiconify()
@@ -446,6 +477,7 @@ class LockScreen:
     def destroy(self):
         uninstall_keyboard_hook()
         set_task_manager_enabled(True)
+        start_explorer()
         try:
             self.root.destroy()
         except Exception:

@@ -25,8 +25,9 @@ else:
 with open(os.path.join(_DIR, "config.json"), encoding="utf-8-sig") as f:
     CONFIG = json.load(f)
 
-ASSET_TAG    = CONFIG["asset_tag"]
-ADMIN_CODE   = CONFIG.get("admin_code", "")
+ASSET_TAG       = CONFIG["asset_tag"]
+ADMIN_CODE      = CONFIG.get("admin_code", "")
+ADMIN_CODE_HASH = CONFIG.get("admin_code_hash", "")
 HB_INTERVAL  = CONFIG.get("heartbeat_interval_sec", 60)
 IDLE_TIMEOUT = CONFIG.get("idle_timeout_sec", 300)
 WAKE_GAP_SEC = 30
@@ -139,7 +140,16 @@ class CartAgent:
         log.info(f"Step1 ID: {entered[:3]}***")
 
         # קוד אדמין
+        is_admin = False
         if ADMIN_CODE and entered == ADMIN_CODE:
+            is_admin = True
+        elif ADMIN_CODE_HASH:
+            import hashlib
+            hashed = hashlib.sha256(entered.encode('utf-8')).hexdigest()
+            if hashed == ADMIN_CODE_HASH:
+                is_admin = True
+
+        if is_admin:
             log.info("Admin code – bypassing lesson")
             self._teacher_bypass = True
             self._do_unlock("מנהל מערכת")

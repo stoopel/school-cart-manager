@@ -94,7 +94,7 @@ def load_interception():
         paths.append(os.path.join(sys._MEIPASS, "interception.dll"))
     paths.extend([
         "interception.dll",
-        r"C:\CartAgent\interception.dll",
+        r"C:\Program Files\CartAgent\interception.dll",
         r"C:\Program Files\Veyon\interception.dll",
         r"C:\Program Files\Veyon\3rdparty\interception\interception.dll"
     ])
@@ -277,6 +277,68 @@ SUCCESS = "#22c55e"; ERROR = "#ef4444"; WARNING = "#f59e0b"
 TEXT_MAIN = "#f1f5f9"; TEXT_DIM = "#94a3b8"; TEXT_NUM = "#60a5fa"
 BORDER = "#2d3f5e"
 
+# ── Win32 System Tray Icon Constants & Functions ──────────────
+NIM_ADD = 0x00000000
+NIM_DELETE = 0x00000002
+NIF_ICON = 0x00000002
+NIF_TIP = 0x00000004
+IDI_SHIELD = 32518
+
+class NOTIFYICONDATAW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("hWnd", wintypes.HWND),
+        ("uID", wintypes.UINT),
+        ("uFlags", wintypes.UINT),
+        ("uCallbackMessage", wintypes.UINT),
+        ("hIcon", wintypes.HICON),
+        ("szTip", ctypes.c_wchar * 128),
+        ("dwState", wintypes.DWORD),
+        ("dwStateMask", wintypes.DWORD),
+        ("szInfo", ctypes.c_wchar * 256),
+        ("uTimeoutOrVersion", wintypes.UINT),
+        ("szInfoTitle", ctypes.c_wchar * 64),
+        ("dwInfoFlags", wintypes.DWORD),
+    ]
+
+_tray_nid = None
+
+def show_tray_icon(hwnd=None):
+    global _tray_nid
+    try:
+        shell32 = ctypes.windll.shell32
+        user32 = ctypes.windll.user32
+        
+        user32.LoadIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+        user32.LoadIconW.restype = wintypes.HICON
+        
+        h_icon = user32.LoadIconW(None, ctypes.cast(IDI_SHIELD, wintypes.LPCWSTR))
+        if not h_icon:
+            h_icon = user32.LoadIconW(None, ctypes.cast(32512, wintypes.LPCWSTR))
+            
+        nid = NOTIFYICONDATAW()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        nid.hWnd = hwnd
+        nid.uID = 1
+        nid.uFlags = NIF_ICON | NIF_TIP
+        nid.hIcon = h_icon
+        nid.szTip = "CartAgent - Security System Running"
+        
+        shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+        _tray_nid = nid
+    except Exception as e:
+        print(f"Error adding tray icon: {e}")
+
+def remove_tray_icon():
+    global _tray_nid
+    if _tray_nid:
+        try:
+            shell32 = ctypes.windll.shell32
+            shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(_tray_nid))
+            _tray_nid = None
+        except Exception:
+            pass
+
 
 class LockScreen:
     def __init__(self, on_unlock, config: dict):
@@ -311,6 +373,9 @@ class LockScreen:
         r.focus_force()
         install_keyboard_hook()
         set_task_manager_enabled(False)
+        show_tray_icon(r.winfo_id())
+        self._check_uninstall_loop()
+        self._check_watchdog_loop()
 
     # ── UI Build ──────────────────────────────────────────────
 
@@ -479,7 +544,7 @@ class LockScreen:
         self.lbl_display.config(text=display)
 
     def _on_key(self, event):
-        if event.char.isdigit():
+        if event.char.isalnum():
             self._on_digit(event.char)
 
     def _on_submit(self):
@@ -626,6 +691,7 @@ class LockScreen:
         self.root.mainloop()
 
     def destroy(self):
+        remove_tray_icon()
         uninstall_keyboard_hook()
         set_task_manager_enabled(True)
         start_explorer()
@@ -633,3 +699,26 @@ class LockScreen:
             self.root.destroy()
         except Exception:
             pass
+
+    def _check_uninstall_loop(self):
+        import os, sys
+        lock_file = r"C:\Program Files\CartAgent\uninstalling.lock"
+        if os.path.exists(lock_file):
+            self.destroy()
+            sys.exit(0)
+        self.root.after(500, self._check_uninstall_loop)
+
+    def _check_watchdog_loop(self):
+        import os, subprocess
+        lock_file = r"C:\Program Files\CartAgent\uninstalling.lock"
+        if os.path.exists(lock_file):
+            return
+        try:
+            r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cart_watchdog.exe"], capture_output=True, text=True)
+            if "cart_watchdog.exe" not in r.stdout:
+                watchdog_path = r"C:\Program Files\CartAgent\cart_watchdog.exe"
+                if os.path.exists(watchdog_path):
+                    subprocess.Popen([watchdog_path])
+        except Exception:
+            pass
+        self.root.after(3000, self._check_watchdog_loop)

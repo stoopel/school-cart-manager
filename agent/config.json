@@ -4,7 +4,7 @@
   "school_name": "בית ספר מחשבים בית הספריה",
   "supabase_url": "https://zxggjorfknageseqlway.supabase.co",
   "supabase_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4Z2dqb3Jma25hZ2VzZXFsd2F5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NDEyNDcsImV4cCI6MjA5NDMxNzI0N30.rs1L95gK0RDy64Ppi97nZW_RBPJzyWuIAKSthOKkj1E",
-  "admin_code": "admin2024",
+  "admin_code_hash": "b8b8eb83374c0bf3b1c3224159f6119dbfff1b7ed6dfecdd80d4e8a895790a34",
   "heartbeat_interval_sec": 60,
   "monitor_interval_sec": 30
 }

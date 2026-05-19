@@ -142,6 +142,12 @@ if (-not (Test-Path $sourceExe)) {
 Write-Host "Copying files to $localDir..." -ForegroundColor Cyan
 Copy-Item $sourceExe -Destination (Join-Path $localDir "cart_agent.exe") -Force
 
+$sourceDll = Join-Path $PSScriptRoot "interception.dll"
+if (Test-Path $sourceDll) {
+    Copy-Item $sourceDll -Destination (Join-Path $localDir "interception.dll") -Force
+    Write-Host "[OK] Copied interception.dll successfully." -ForegroundColor Green
+}
+
 # Save data to local config
 $localConfigPath = Join-Path $localDir "config.json"
 $config.asset_tag = $assetTag

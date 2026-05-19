@@ -33,8 +33,143 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
         ("dwExtraInfo", ctypes.c_size_t)
     ]
 
+# Keyboard hook globals
 _keyboard_hook = None
 _callback_ptr = None
+
+# Interception Driver structures, variables & globals
+class InterceptionKeyStroke(ctypes.Structure):
+    _fields_ = [
+        ('code', ctypes.c_ushort),
+        ('state', ctypes.c_ushort),
+        ('information', ctypes.c_uint)
+    ]
+
+class InterceptionMouseStroke(ctypes.Structure):
+    _fields_ = [
+        ('state', ctypes.c_ushort),
+        ('flags', ctypes.c_ushort),
+        ('rolling', ctypes.c_short),
+        ('x', ctypes.c_int),
+        ('y', ctypes.c_int),
+        ('information', ctypes.c_uint)
+    ]
+
+class InterceptionStroke(ctypes.Union):
+    _fields_ = [
+        ('mouse', InterceptionMouseStroke),
+        ('key', InterceptionKeyStroke)
+    ]
+
+_interception_dll = None
+_interception_context = None
+_interception_thread = None
+_interception_running = False
+
+# Scan Code Set 1 Whitelist for CartAgent input:
+# - Escape: 0x01
+# - Backspace: 0x0E
+# - Enter: 0x1C
+# - Left/Right Shift: 0x2A, 0x36
+# - Digits 0-9: 0x02 to 0x0B
+# - Letters A-Z: 0x10-0x19, 0x1E-0x26, 0x2C-0x32
+# - Numpad Digits: 0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48, 0x49, 0x52
+ALLOWED_SCAN_CODES = {
+    0x01, 0x0E, 0x1C, 0x2A, 0x36,
+    0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+    0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48, 0x49, 0x52,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
+    0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26,
+    0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32
+}
+
+def load_interception():
+    global _interception_dll
+    if _interception_dll is not None:
+        return _interception_dll
+    
+    import os, sys
+    paths = []
+    if getattr(sys, 'frozen', False):
+        paths.append(os.path.join(sys._MEIPASS, "interception.dll"))
+    paths.extend([
+        "interception.dll",
+        r"C:\CartAgent\interception.dll",
+        r"C:\Program Files\Veyon\interception.dll",
+        r"C:\Program Files\Veyon\3rdparty\interception\interception.dll"
+    ])
+    
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                dll = ctypes.CDLL(path)
+                
+                # Configure API Signatures
+                dll.interception_create_context.restype = ctypes.c_void_p
+                dll.interception_destroy_context.argtypes = [ctypes.c_void_p]
+                dll.interception_destroy_context.restype = None
+                
+                dll.interception_set_filter.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int),
+                    ctypes.c_ushort
+                ]
+                dll.interception_set_filter.restype = None
+                
+                dll.interception_wait.argtypes = [ctypes.c_void_p]
+                dll.interception_wait.restype = ctypes.c_int
+                
+                dll.interception_receive.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.c_int,
+                    ctypes.POINTER(InterceptionStroke),
+                    ctypes.c_uint
+                ]
+                dll.interception_receive.restype = ctypes.c_int
+                
+                dll.interception_send.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.c_int,
+                    ctypes.POINTER(InterceptionStroke),
+                    ctypes.c_uint
+                ]
+                dll.interception_send.restype = ctypes.c_int
+                
+                _interception_dll = dll
+                return dll
+            except Exception as e:
+                pass
+    return None
+
+def _interception_thread_proc():
+    global _interception_context, _interception_running
+    try:
+        dll = _interception_dll
+        context = _interception_context
+        
+        is_keyboard_proto = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int)
+        is_keyboard_func = is_keyboard_proto(dll.interception_is_keyboard)
+        
+        dll.interception_set_filter(context, is_keyboard_func, 0xFFFF)
+        stroke = InterceptionStroke()
+        
+        while _interception_running:
+            device = dll.interception_wait(context)
+            if not _interception_running:
+                break
+            if device <= 0:
+                continue
+            
+            res = dll.interception_receive(context, device, ctypes.byref(stroke), 1)
+            if res > 0:
+                scan_code = stroke.key.code
+                if scan_code in ALLOWED_SCAN_CODES:
+                    dll.interception_send(context, device, ctypes.byref(stroke), 1)
+                else:
+                    # BLOCK key by ignoring it and not sending it to the OS
+                    pass
+    except Exception:
+        pass
 
 def _low_level_keyboard_proc(nCode, wParam, lParam):
     if nCode >= 0:
@@ -43,14 +178,6 @@ def _low_level_keyboard_proc(nCode, wParam, lParam):
             vkCode = kbd_struct.vkCode
             
             # Whitelist of allowed keys to unlock the PC:
-            # - Backspace: 0x08
-            # - Enter: 0x0D
-            # - Escape: 0x1B
-            # - Shift: 0x10, LSHIFT: 0xA0, RSHIFT: 0xA1
-            # - Digits 0-9: 0x30 to 0x39
-            # - Letters A-Z (English/Hebrew keyboard keys): 0x41 to 0x5A
-            # - Numpad digits 0-9: 0x60 to 0x69
-            
             is_allowed = (
                 vkCode == 0x08 or
                 vkCode == 0x0D or
@@ -80,14 +207,44 @@ user32.CallNextHookEx.restype = wintypes.LPARAM
 
 def install_keyboard_hook():
     global _keyboard_hook, _callback_ptr
+    global _interception_context, _interception_thread, _interception_running
+    
+    # 1. Attempt kernel-level blocking via Veyon's Interception driver first
+    dll = load_interception()
+    if dll is not None:
+        try:
+            context = dll.interception_create_context()
+            if context:
+                _interception_context = context
+                _interception_running = True
+                import threading
+                _interception_thread = threading.Thread(target=_interception_thread_proc, daemon=True)
+                _interception_thread.start()
+                return
+        except Exception:
+            pass
+            
+    # 2. Fall back to standard type-safe low-level hook if driver is not active/installed
     if _keyboard_hook is not None:
         return
     _callback_ptr = HOOKPROC(_low_level_keyboard_proc)
-    # The third argument can be NULL for thread hooks or global LL hooks without DLL
     _keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _callback_ptr, None, 0)
 
 def uninstall_keyboard_hook():
     global _keyboard_hook, _callback_ptr
+    global _interception_context, _interception_thread, _interception_running
+    
+    # 1. Stop Interception driver context
+    if _interception_context:
+        try:
+            _interception_running = False
+            _interception_dll.interception_destroy_context(_interception_context)
+        except Exception:
+            pass
+        _interception_context = None
+        _interception_thread = None
+        
+    # 2. Stop fallback hook
     if _keyboard_hook is not None:
         user32.UnhookWindowsHookEx(_keyboard_hook)
         _keyboard_hook = None

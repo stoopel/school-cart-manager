@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('config.json', '.')]
+datas = [('config.json', '.'), ('interception.dll', '.')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('charset_normalizer')

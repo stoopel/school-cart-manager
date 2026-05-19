@@ -148,6 +148,12 @@ if (Test-Path $sourceDll) {
     Write-Host "[OK] Copied interception.dll successfully." -ForegroundColor Green
 }
 
+$sourceInst = Join-Path $PSScriptRoot "install-interception.exe"
+if (Test-Path $sourceInst) {
+    Copy-Item $sourceInst -Destination (Join-Path $localDir "install-interception.exe") -Force
+    Write-Host "[OK] Copied install-interception.exe successfully." -ForegroundColor Green
+}
+
 # Save data to local config
 $localConfigPath = Join-Path $localDir "config.json"
 $config.asset_tag = $assetTag
@@ -155,6 +161,31 @@ $config.cart_name = $cartName
 $config | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding UTF8
 $config | ConvertTo-Json -Depth 10 | Set-Content $localConfigPath -Encoding UTF8
 Write-Host "[OK] Local configuration file updated." -ForegroundColor Green
+
+# Check and install Interception Driver
+$needsReboot = $false
+$driverInstalled = (Test-Path "$env:windir\System32\drivers\interception.sys") -or (Get-Service -Name "Interception" -ErrorAction SilentlyContinue)
+
+if (-not $driverInstalled) {
+    Write-Host ""
+    Write-Host "==========================================================" -ForegroundColor Yellow
+    Write-Host "Installing Kernel-Level Input Protection Driver (Veyon)..." -ForegroundColor Cyan
+    Write-Host "==========================================================" -ForegroundColor Yellow
+    
+    $installPath = Join-Path $localDir "install-interception.exe"
+    if (Test-Path $installPath) {
+        Write-Host "Running driver installer..." -ForegroundColor Cyan
+        # Run installer with /install argument
+        Start-Process -FilePath $installPath -ArgumentList "/install" -WorkingDirectory $localDir -NoNewWindow -Wait
+        Write-Host "[OK] Driver installation command executed." -ForegroundColor Green
+        $needsReboot = $true
+    } else {
+        Write-Host "[WARNING] install-interception.exe not found! Skipping driver installation." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host ""
+    Write-Host "[OK] Interception Kernel Driver is already installed." -ForegroundColor Green
+}
 
 
 # 4. Register in Windows Registry as User Shell (Instant Autostart)
@@ -239,5 +270,24 @@ Write-Host "=========================================" -ForegroundColor Green
 Write-Host "Installation completed successfully!" -ForegroundColor Green
 Write-Host "The screen lock is now running in the background and registered to start automatically on boot." -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
+
+if ($needsReboot) {
+    Write-Host ""
+    Write-Host "======================================================================" -ForegroundColor Magenta
+    Write-Host "ATTENTION: System Reboot Required!" -ForegroundColor Red
+    Write-Host "To activate the newly installed kernel-level keyboard driver," -ForegroundColor Yellow
+    Write-Host "you must restart your computer." -ForegroundColor Yellow
+    Write-Host "======================================================================" -ForegroundColor Magenta
+    Write-Host ""
+    $choice = Read-Host "Would you like to restart the computer now? (Y/N)"
+    if ($choice -match "^[yY]$") {
+        Write-Host "Rebooting system..." -ForegroundColor Red
+        Stop-Transcript
+        Restart-Computer -Force
+        exit
+    } else {
+        Write-Host "Please remember to restart the computer manually before testing!" -ForegroundColor Yellow
+    }
+}
 
 Stop-Transcript

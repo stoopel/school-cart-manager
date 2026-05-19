@@ -39,26 +39,28 @@ _callback_ptr = None
 def _low_level_keyboard_proc(nCode, wParam, lParam):
     if nCode >= 0:
         vkCode = lParam.contents.vkCode
-        flags = lParam.contents.flags
         
-        # Block Windows keys
-        if vkCode in (VK_LWIN, VK_RWIN):
-            return 1
-            
-        # Block Alt-Tab and Alt-Esc
-        is_alt_down = (flags & 0x20) != 0
-        if is_alt_down and (vkCode in (VK_TAB, VK_ESCAPE)):
-            return 1
-            
-        # Block Ctrl-Esc
-        is_ctrl_down = (user32.GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
-        if vkCode == VK_ESCAPE and is_ctrl_down:
-            return 1
-            
-        # Block Ctrl-Shift-Esc
-        is_shift_down = (user32.GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
-        if vkCode == VK_ESCAPE and is_ctrl_down and is_shift_down:
-            return 1
+        # Whitelist of allowed keys to unlock the PC:
+        # - Backspace: 0x08
+        # - Enter: 0x0D
+        # - Escape: 0x1B
+        # - Shift: 0x10, LSHIFT: 0xA0, RSHIFT: 0xA1
+        # - Digits 0-9: 0x30 to 0x39
+        # - Letters A-Z (English/Hebrew keyboard keys): 0x41 to 0x5A
+        # - Numpad digits 0-9: 0x60 to 0x69
+        
+        is_allowed = (
+            vkCode == 0x08 or
+            vkCode == 0x0D or
+            vkCode == 0x1B or
+            vkCode in (0x10, 0xA0, 0xA1) or
+            (0x30 <= vkCode <= 0x39) or
+            (0x41 <= vkCode <= 0x5A) or
+            (0x60 <= vkCode <= 0x69)
+        )
+        
+        if not is_allowed:
+            return 1 # BLOCK all other keys (Alt, Win, Ctrl, Fn, F1-F12, etc.)
             
     return user32.CallNextHookEx(None, nCode, wParam, lParam)
 

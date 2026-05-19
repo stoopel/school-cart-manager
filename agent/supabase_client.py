@@ -13,7 +13,7 @@ if getattr(sys, 'frozen', False):
 else:
     _DIR = os.path.dirname(os.path.abspath(__file__))
 
-with open(os.path.join(_DIR, "config.json"), encoding="utf-8") as f:
+with open(os.path.join(_DIR, "config.json"), encoding="utf-8-sig") as f:
     _CFG = json.load(f)
 
 SUPABASE_URL = _CFG["supabase_url"]

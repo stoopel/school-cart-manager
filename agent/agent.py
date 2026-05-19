@@ -22,7 +22,7 @@ if getattr(sys, 'frozen', False):
 else:
     _DIR = os.path.dirname(os.path.abspath(__file__))
 
-with open(os.path.join(_DIR, "config.json"), encoding="utf-8") as f:
+with open(os.path.join(_DIR, "config.json"), encoding="utf-8-sig") as f:
     CONFIG = json.load(f)
 
 ASSET_TAG    = CONFIG["asset_tag"]

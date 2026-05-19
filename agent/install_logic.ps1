@@ -11,7 +11,7 @@ if (-not (Test-Path $configPath)) {
     exit
 }
 
-$config = Get-Content $configPath -Raw | ConvertFrom-Json
+$config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $supaUrl = $config.supabase_url
 $supaKey = $config.supabase_key
 
@@ -127,27 +127,6 @@ if (-not (Test-Path $localDir)) {
     New-Item -ItemType Directory -Path $localDir -Force | Out-Null
 }
 
-# Find NSSM on USB
-$sourceNssm = Join-Path $PSScriptRoot "nssm.exe"
-if (-not (Test-Path $sourceNssm)) {
-    $sourceNssm = Join-Path $PSScriptRoot "dist\nssm.exe"
-}
-
-if (-not (Test-Path $sourceNssm)) {
-    Write-Host "Downloading utility tool (NSSM)..." -ForegroundColor Yellow
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    try {
-        Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$PSScriptRoot\nssm.zip"
-        Expand-Archive "$PSScriptRoot\nssm.zip" -Force -DestinationPath "$PSScriptRoot\nssm_temp"
-        Copy-Item "$PSScriptRoot\nssm_temp\nssm-2.24\win64\nssm.exe" -Destination $PSScriptRoot
-        $sourceNssm = Join-Path $PSScriptRoot "nssm.exe"
-        Remove-Item "$PSScriptRoot\nssm.zip" -Force
-        Remove-Item "$PSScriptRoot\nssm_temp" -Recurse -Force
-    } catch {
-        Write-Host "[WARNING] NSSM download failed, checking if local version exists..." -ForegroundColor Yellow
-    }
-}
-
 # Find Executable on USB
 $sourceExe = Join-Path $PSScriptRoot "dist\cart_agent.exe"
 if (-not (Test-Path $sourceExe)) {
@@ -162,12 +141,6 @@ if (-not (Test-Path $sourceExe)) {
 # Copy files locally
 Write-Host "Copying files to $localDir..." -ForegroundColor Cyan
 Copy-Item $sourceExe -Destination (Join-Path $localDir "cart_agent.exe") -Force
-if (Test-Path $sourceNssm) {
-    Copy-Item $sourceNssm -Destination (Join-Path $localDir "nssm.exe") -Force
-} else {
-    Write-Host "Error: nssm.exe not found and could not be downloaded." -ForegroundColor Red
-    exit
-}
 
 # Save data to local config
 $localConfigPath = Join-Path $localDir "config.json"
@@ -178,30 +151,47 @@ $config | ConvertTo-Json -Depth 10 | Set-Content $localConfigPath -Encoding UTF8
 Write-Host "[OK] Local configuration file updated." -ForegroundColor Green
 
 
-# 4. Register Windows Service
+# 4. Register in Windows Registry Run (Autostart)
 Write-Host ""
-Write-Host "Installing system service (CartAgent)..." -ForegroundColor Cyan
+Write-Host "Registering CartAgent in Windows Registry (Autostart)..." -ForegroundColor Cyan
+
+# Remove old NSSM service if it exists (Clean up)
 $serviceName = "CartAgent"
 $localNssmPath = Join-Path $localDir "nssm.exe"
-$localExePath = Join-Path $localDir "cart_agent.exe"
+if (Test-Path $localNssmPath) {
+    & $localNssmPath stop $serviceName 2>$null
+    & $localNssmPath remove $serviceName confirm 2>$null
+    Remove-Item $localNssmPath -Force 2>$null
+}
+# Also make sure to stop any running service via standard sc command if nssm is missing
+sc.exe stop $serviceName 2>$null | Out-Null
+sc.exe delete $serviceName 2>$null | Out-Null
 
-# Stop and remove service if exists
-& $localNssmPath stop $serviceName 2>$null
-& $localNssmPath remove $serviceName confirm 2>$null
+# Kill any existing cart_agent process to prevent file-lock
+Stop-Process -Name "cart_agent" -Force 2>$null
 
-# Reinstall from local paths
-& $localNssmPath install $serviceName "`"$localExePath`""
-& $localNssmPath set $serviceName DisplayName "Cart Agent - Lock Screen"
-& $localNssmPath set $serviceName Description "School Laptop Cart Manager - Lock Screen"
-& $localNssmPath set $serviceName Start SERVICE_AUTO_START
-& $localNssmPath set $serviceName AppDirectory "`"$localDir`""
+# Register in HKLM Run
+$runPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
+$exePath = Join-Path $localDir "cart_agent.exe"
 
-& $localNssmPath start $serviceName
+try {
+    Set-ItemProperty -Path $runPath -Name "CartAgent" -Value "`"$exePath`"" -Force | Out-Null
+    Write-Host "[OK] Registered successfully in HKLM Registry Run Key." -ForegroundColor Green
+} catch {
+    Write-Host "[WARNING] Failed to register in HKLM (All Users). Trying HKCU (Current User)..." -ForegroundColor Yellow
+    $runPathCU = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    Set-ItemProperty -Path $runPathCU -Name "CartAgent" -Value "`"$exePath`"" -Force | Out-Null
+    Write-Host "[OK] Registered successfully in HKCU Registry Run Key." -ForegroundColor Green
+}
+
+# Start the agent immediately in the current user session
+Write-Host "Starting CartAgent immediately..." -ForegroundColor Cyan
+Start-Process -FilePath $exePath -WorkingDirectory $localDir
 
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "Installation completed successfully!" -ForegroundColor Green
-Write-Host "The service is now running in the background and the computer is configured and connected." -ForegroundColor Green
+Write-Host "The screen lock is now running in the background and registered to start automatically on boot." -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
 
 Stop-Transcript

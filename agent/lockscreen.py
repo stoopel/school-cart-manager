@@ -8,6 +8,85 @@ from tkinter import font as tkfont
 import subprocess
 import os
 from datetime import datetime
+import ctypes
+from ctypes import wintypes
+import winreg
+
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+# Win32 Constants for Low-Level Keyboard Hook
+WH_KEYBOARD_LL = 13
+VK_TAB = 0x09
+VK_ESCAPE = 0x1B
+VK_LWIN = 0x5B
+VK_RWIN = 0x5C
+VK_CONTROL = 0x11
+VK_SHIFT = 0x10
+
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", wintypes.DWORD),
+        ("scanCode", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG))
+    ]
+
+_keyboard_hook = None
+_callback_ptr = None
+
+def _low_level_keyboard_proc(nCode, wParam, lParam):
+    if nCode >= 0:
+        vkCode = lParam.contents.vkCode
+        flags = lParam.contents.flags
+        
+        # Block Windows keys
+        if vkCode in (VK_LWIN, VK_RWIN):
+            return 1
+            
+        # Block Alt-Tab and Alt-Esc
+        is_alt_down = (flags & 0x20) != 0
+        if is_alt_down and (vkCode in (VK_TAB, VK_ESCAPE)):
+            return 1
+            
+        # Block Ctrl-Esc
+        is_ctrl_down = (user32.GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
+        if vkCode == VK_ESCAPE and is_ctrl_down:
+            return 1
+            
+        # Block Ctrl-Shift-Esc
+        is_shift_down = (user32.GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
+        if vkCode == VK_ESCAPE and is_ctrl_down and is_shift_down:
+            return 1
+            
+    return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+# Keep reference to callback
+HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int, wintypes.WPARAM, ctypes.POINTER(KBDLLHOOKSTRUCT))
+
+def install_keyboard_hook():
+    global _keyboard_hook, _callback_ptr
+    if _keyboard_hook is not None:
+        return
+    _callback_ptr = HOOKPROC(_low_level_keyboard_proc)
+    h_mod = kernel32.GetModuleHandleW(None)
+    _keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _callback_ptr, h_mod, 0)
+
+def uninstall_keyboard_hook():
+    global _keyboard_hook, _callback_ptr
+    if _keyboard_hook is not None:
+        user32.UnhookWindowsHookEx(_keyboard_hook)
+        _keyboard_hook = None
+        _callback_ptr = None
+
+def set_task_manager_enabled(enabled: bool):
+    try:
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System")
+        winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 0 if enabled else 1)
+        winreg.CloseKey(key)
+    except Exception:
+        pass
 
 BG = "#0a0f1e"; BG_CARD = "#131929"; BG_INPUT = "#1e2840"
 ACCENT = "#3b82f6"; ACCENT_DARK = "#1d4ed8"
@@ -47,6 +126,8 @@ class LockScreen:
         r.bind("<Alt-Tab>", lambda e: "break")
         r.protocol("WM_DELETE_WINDOW", lambda: None)
         r.focus_force()
+        install_keyboard_hook()
+        set_task_manager_enabled(False)
 
     # ── UI Build ──────────────────────────────────────────────
 
@@ -324,6 +405,8 @@ class LockScreen:
         self.root.after(2000, self._do_unlock)
 
     def _do_unlock(self):
+        uninstall_keyboard_hook()
+        set_task_manager_enabled(True)
         self.root.attributes("-topmost", False)
         self.root.withdraw()
         if self.on_unlock:
@@ -333,6 +416,8 @@ class LockScreen:
         """נועל חזרה – נקרא כשהשאלה נסגרת מרחוק"""
         self._unlocked = False
         self.entered_id = ""
+        install_keyboard_hook()
+        set_task_manager_enabled(False)
         def _do():
             self.lbl_display.config(text="")
             self.root.deiconify()
@@ -357,6 +442,8 @@ class LockScreen:
         self.root.mainloop()
 
     def destroy(self):
+        uninstall_keyboard_hook()
+        set_task_manager_enabled(True)
         try:
             self.root.destroy()
         except Exception:

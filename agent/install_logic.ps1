@@ -171,19 +171,54 @@ sc.exe delete $serviceName 2>$null | Out-Null
 Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "CartAgent" -ErrorAction SilentlyContinue | Out-Null
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "CartAgent" -ErrorAction SilentlyContinue | Out-Null
 
+# Clean up the elevated Administrator HKCU Shell registry entry if written previously
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "Shell" -ErrorAction SilentlyContinue | Out-Null
+
 # Kill any existing cart_agent process to prevent file-lock
 Stop-Process -Name "cart_agent" -Force 2>$null
 
-# Register in HKCU Winlogon Shell for current user (student account)
-$winlogonPath = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
+# 5. Register custom shell for the currently logged-on user (e.g. Student account)
 $exePath = Join-Path $localDir "cart_agent.exe"
 
-try {
-    if (-not (Test-Path $winlogonPath)) {
-        New-Item -Path "HKCU:\Software\Microsoft\Windows NT\CurrentVersion" -Name "Winlogon" -Force | Out-Null
+# Resolve logged-on user
+$loggedUser = (Get-CimInstance Win32_ComputerSystem).UserName
+if ($loggedUser -and $loggedUser.Contains("\")) {
+    $loggedUser = $loggedUser -split '\\' | Select-Object -Last 1
+}
+if (-not $loggedUser) {
+    $explorerProc = Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" | Select-Object -First 1
+    if ($explorerProc) {
+        $owner = Invoke-CimMethod -InputObject $explorerProc -MethodName GetOwner
+        $loggedUser = $owner.User
     }
-    Set-ItemProperty -Path $winlogonPath -Name "Shell" -Value $exePath -Force | Out-Null
-    Write-Host "[OK] Registered successfully as User Shell in Registry." -ForegroundColor Green
+}
+
+$userSID = $null
+if ($loggedUser) {
+    $profilePath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\*"
+    $userSID = (Get-ItemProperty -Path $profilePath | Where-Object { ($_.ProfileImagePath -split '\\' | Select-Object -Last 1) -eq $loggedUser }).PSChildName
+}
+
+$regPath = $null
+if ($userSID) {
+    $regPath = "Registry::HKEY_USERS\$userSID\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    Write-Host "Resolved logged-on user: $loggedUser (SID: $userSID)" -ForegroundColor Green
+} else {
+    $regPath = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    Write-Host "[WARNING] Could not resolve SID for active user. Falling back to current process context..." -ForegroundColor Yellow
+}
+
+try {
+    # Ensure Winlogon subkey exists
+    $parentPath = $regPath.Substring(0, $regPath.LastIndexOf('\'))
+    if (-not (Test-Path $parentPath)) {
+        New-Item -Path $parentPath.Substring(0, $parentPath.LastIndexOf('\')) -Name $parentPath.Substring($parentPath.LastIndexOf('\') + 1) -Force | Out-Null
+    }
+    if (-not (Test-Path $regPath)) {
+        New-Item -Path $parentPath -Name "Winlogon" -Force | Out-Null
+    }
+    Set-ItemProperty -Path $regPath -Name "Shell" -Value "`"$exePath`"" -Force | Out-Null
+    Write-Host "[OK] Registered successfully as User Shell in Registry path: $regPath" -ForegroundColor Green
 } catch {
     Write-Host "Error registering user Shell in Registry: $_" -ForegroundColor Red
     exit

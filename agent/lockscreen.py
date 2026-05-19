@@ -39,7 +39,7 @@ _callback_ptr = None
 def _low_level_keyboard_proc(nCode, wParam, lParam):
     if nCode >= 0:
         try:
-            kbd_struct = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+            kbd_struct = KBDLLHOOKSTRUCT.from_address(lParam)
             vkCode = kbd_struct.vkCode
             
             # Whitelist of allowed keys to unlock the PC:

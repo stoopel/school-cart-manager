@@ -101,11 +101,7 @@ def set_task_manager_enabled(enabled: bool):
     except Exception:
         pass
 
-def kill_explorer():
-    try:
-        subprocess.run(["taskkill", "/f", "/im", "explorer.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+
 
 def start_explorer():
     try:
@@ -158,7 +154,6 @@ class LockScreen:
         r.focus_force()
         install_keyboard_hook()
         set_task_manager_enabled(False)
-        kill_explorer()
 
     # ── UI Build ──────────────────────────────────────────────
 
@@ -450,7 +445,6 @@ class LockScreen:
         self.entered_id = ""
         install_keyboard_hook()
         set_task_manager_enabled(False)
-        kill_explorer()
         def _do():
             self.lbl_display.config(text="")
             self.root.deiconify()

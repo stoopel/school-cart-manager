@@ -151,9 +151,9 @@ $config | ConvertTo-Json -Depth 10 | Set-Content $localConfigPath -Encoding UTF8
 Write-Host "[OK] Local configuration file updated." -ForegroundColor Green
 
 
-# 4. Register in Windows Registry Run (Autostart)
+# 4. Register in Windows Registry as User Shell (Instant Autostart)
 Write-Host ""
-Write-Host "Registering CartAgent in Windows Registry (Autostart)..." -ForegroundColor Cyan
+Write-Host "Registering CartAgent in Windows Registry (User Shell)..." -ForegroundColor Cyan
 
 # Remove old NSSM service if it exists (Clean up)
 $serviceName = "CartAgent"
@@ -167,21 +167,26 @@ if (Test-Path $localNssmPath) {
 sc.exe stop $serviceName 2>$null | Out-Null
 sc.exe delete $serviceName 2>$null | Out-Null
 
+# Clean up any old Run Key registrations to prevent duplicates
+Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "CartAgent" -ErrorAction SilentlyContinue | Out-Null
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "CartAgent" -ErrorAction SilentlyContinue | Out-Null
+
 # Kill any existing cart_agent process to prevent file-lock
 Stop-Process -Name "cart_agent" -Force 2>$null
 
-# Register in HKLM Run
-$runPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
+# Register in HKCU Winlogon Shell for current user (student account)
+$winlogonPath = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
 $exePath = Join-Path $localDir "cart_agent.exe"
 
 try {
-    Set-ItemProperty -Path $runPath -Name "CartAgent" -Value "`"$exePath`"" -Force | Out-Null
-    Write-Host "[OK] Registered successfully in HKLM Registry Run Key." -ForegroundColor Green
+    if (-not (Test-Path $winlogonPath)) {
+        New-Item -Path "HKCU:\Software\Microsoft\Windows NT\CurrentVersion" -Name "Winlogon" -Force | Out-Null
+    }
+    Set-ItemProperty -Path $winlogonPath -Name "Shell" -Value $exePath -Force | Out-Null
+    Write-Host "[OK] Registered successfully as User Shell in Registry." -ForegroundColor Green
 } catch {
-    Write-Host "[WARNING] Failed to register in HKLM (All Users). Trying HKCU (Current User)..." -ForegroundColor Yellow
-    $runPathCU = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    Set-ItemProperty -Path $runPathCU -Name "CartAgent" -Value "`"$exePath`"" -Force | Out-Null
-    Write-Host "[OK] Registered successfully in HKCU Registry Run Key." -ForegroundColor Green
+    Write-Host "Error registering user Shell in Registry: $_" -ForegroundColor Red
+    exit
 }
 
 # Start the agent immediately in the current user session

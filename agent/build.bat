@@ -11,7 +11,7 @@ pyinstaller ^
   --onefile ^
   --windowed ^
   --name cart_agent ^
-  --icon=icon.ico ^
+  --collect-all charset_normalizer ^
   --add-data "config.json;." ^
   agent.py
 

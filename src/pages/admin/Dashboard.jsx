@@ -72,7 +72,21 @@ export default function Dashboard() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+
+    // Subscribe to realtime database changes for automatic refresh
+    const channel = supabase
+      .channel('dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_loans' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => { load() })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [load])
 
   async function clearStrike(student) {
     if (!confirm(`לנקות ${student.charge_strikes} strikes של ${student.name}?`)) return

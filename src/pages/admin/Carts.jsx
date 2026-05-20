@@ -20,8 +20,41 @@ export default function Carts() {
   const [cartToDelete, setCartToDelete] = useState(null)
   const [cartToHardDelete, setCartToHardDelete] = useState(null)
 
-  useEffect(() => { loadCarts() }, [])
-  useEffect(() => { if (selectedCart) loadDevices(selectedCart.id) }, [selectedCart])
+  useEffect(() => {
+    loadCarts()
+  }, [])
+
+  useEffect(() => {
+    if (selectedCart) {
+      loadDevices(selectedCart.id)
+    }
+  }, [selectedCart])
+
+  // Realtime subscription for automatic updates on carts, devices, and loans
+  useEffect(() => {
+    const channel = supabase
+      .channel('carts-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'carts' }, () => {
+        loadCarts()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, (payload) => {
+        loadCarts()
+        if (selectedCart && (payload.new?.cart_id === selectedCart.id || payload.old?.cart_id === selectedCart.id)) {
+          loadDevices(selectedCart.id)
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_loans' }, () => {
+        loadCarts()
+        if (selectedCart) {
+          loadDevices(selectedCart.id)
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [selectedCart])
 
   async function loadCarts() {
     setLoading(true)

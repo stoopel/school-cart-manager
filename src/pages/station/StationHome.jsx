@@ -20,7 +20,18 @@ export default function StationHome() {
   useEffect(() => {
     loadCart()
     const interval = setInterval(loadStats, 30000)
-    return () => clearInterval(interval)
+
+    const channel = supabase
+      .channel('station-home-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_loans' }, () => {
+        loadStats()
+      })
+      .subscribe()
+
+    return () => {
+      clearInterval(interval)
+      supabase.removeChannel(channel)
+    }
   }, [cartId])
 
   async function loadCart() {

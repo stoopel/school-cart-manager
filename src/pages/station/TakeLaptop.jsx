@@ -15,12 +15,43 @@ export default function TakeLaptop({ cart, onDone }) {
   const scannerRef = useRef(null)
 
   useEffect(() => {
-    if (cart) loadDevices()
+    if (cart) {
+      loadDevices()
+
+      // Realtime subscription to refresh device availability status in real-time
+      const channel = supabase
+        .channel(`take-realtime-${cart.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'device_loans' }, () => {
+          loadDevices()
+        })
+        .subscribe()
+
+      return () => {
+        supabase.removeChannel(channel)
+      }
+    }
   }, [cart])
 
   async function loadDevices() {
-    const { data } = await supabase.from('devices').select('*').eq('cart_id', cart.id).order('device_number')
-    setDevices(data ?? [])
+    const { data: devs } = await supabase
+      .from('devices')
+      .select('*')
+      .eq('cart_id', cart.id)
+      .is('deleted_at', null)
+      .order('device_number')
+
+    const { data: activeLoans } = await supabase
+      .from('device_loans')
+      .select('device_id')
+      .eq('status', 'active')
+      .is('checkin_at', null)
+
+    const activeLoanIds = new Set(activeLoans?.map(l => l.device_id) ?? [])
+
+    setDevices((devs ?? []).map(d => ({
+      ...d,
+      isTaken: activeLoanIds.has(d.id)
+    })))
   }
 
   // Keypad input
@@ -195,8 +226,15 @@ export default function TakeLaptop({ cart, onDone }) {
             <div className="station-panel-title">בחר מספר מחשב</div>
             <div className="station-numgrid">
               {devices.map(d => (
-                <button key={d.id} className="station-numkey" onClick={() => processDevice(String(d.device_number))}>
+                <button
+                  key={d.id}
+                  className={`station-numkey${d.isTaken ? ' taken' : ''}`}
+                  onClick={() => !d.isTaken && processDevice(String(d.device_number))}
+                  disabled={d.isTaken}
+                  style={d.isTaken ? { opacity: 0.4, cursor: 'not-allowed', background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)' } : {}}
+                >
                   {d.device_number}
+                  {d.isTaken && <div style={{ fontSize: '0.65rem', color: '#ef4444', marginTop: 2 }}>תפוס</div>}
                 </button>
               ))}
             </div>

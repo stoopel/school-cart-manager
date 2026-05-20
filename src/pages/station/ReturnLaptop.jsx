@@ -13,11 +13,44 @@ export default function ReturnLaptop({ cart, onDone }) {
   const [devices, setDevices]   = useState([])
   const scannerRef = useRef(null)
 
-  useEffect(() => { if (cart) loadDevices() }, [cart])
+  useEffect(() => {
+    if (cart) {
+      loadDevices()
+
+      // Realtime subscription to refresh device return availability status in real-time
+      const channel = supabase
+        .channel(`return-realtime-${cart.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'device_loans' }, () => {
+          loadDevices()
+        })
+        .subscribe()
+
+      return () => {
+        supabase.removeChannel(channel)
+      }
+    }
+  }, [cart])
 
   async function loadDevices() {
-    const { data } = await supabase.from('devices').select('*').eq('cart_id', cart.id).order('device_number')
-    setDevices(data ?? [])
+    const { data: devs } = await supabase
+      .from('devices')
+      .select('*')
+      .eq('cart_id', cart.id)
+      .is('deleted_at', null)
+      .order('device_number')
+
+    const { data: activeLoans } = await supabase
+      .from('device_loans')
+      .select('device_id')
+      .eq('status', 'active')
+      .is('checkin_at', null)
+
+    const activeLoanIds = new Set(activeLoans?.map(l => l.device_id) ?? [])
+
+    setDevices((devs ?? []).map(d => ({
+      ...d,
+      isBorrowed: activeLoanIds.has(d.id)
+    })))
   }
 
   // QR Scanner – מצלמה קדמית (facingMode: user) לטאבלט מורכב על קיר
@@ -124,8 +157,15 @@ export default function ReturnLaptop({ cart, onDone }) {
             <div className="station-panel-title">בחר מספר מחשב להחזרה</div>
             <div className="station-numgrid">
               {devices.map(d => (
-                <button key={d.id} className="station-numkey" onClick={() => lookupDevice(String(d.device_number))}>
+                <button
+                  key={d.id}
+                  className={`station-numkey${!d.isBorrowed ? ' returned' : ''}`}
+                  onClick={() => d.isBorrowed && lookupDevice(String(d.device_number))}
+                  disabled={!d.isBorrowed}
+                  style={!d.isBorrowed ? { opacity: 0.4, cursor: 'not-allowed', background: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.2)' } : {}}
+                >
                   {d.device_number}
+                  {!d.isBorrowed && <div style={{ fontSize: '0.65rem', color: '#10b981', marginTop: 2 }}>בעגלה</div>}
                 </button>
               ))}
             </div>

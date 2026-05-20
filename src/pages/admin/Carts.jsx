@@ -3,6 +3,8 @@ import { supabase } from '../../lib/supabase'
 
 export default function Carts() {
   const [carts, setCarts]         = useState([])
+  const [deletedCarts, setDeletedCarts] = useState([])
+  const [viewDeleted, setViewDeleted] = useState(false)
   const [devices, setDevices]     = useState([])
   const [selectedCart, setSelectedCart] = useState(null)
   const [loading, setLoading]     = useState(true)
@@ -14,35 +16,71 @@ export default function Carts() {
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
 
+  // מודאלים למחיקה
+  const [cartToDelete, setCartToDelete] = useState(null)
+  const [cartToHardDelete, setCartToHardDelete] = useState(null)
+
   useEffect(() => { loadCarts() }, [])
   useEffect(() => { if (selectedCart) loadDevices(selectedCart.id) }, [selectedCart])
 
   async function loadCarts() {
     setLoading(true)
-    const { data } = await supabase.from('cart_status').select('*').order('name')
-    setCarts(data ?? [])
-    if (data?.length && !selectedCart) setSelectedCart(data[0])
+    
+    // טעינת עגלות פעילות
+    const { data: activeData } = await supabase
+      .from('cart_status')
+      .select('*')
+      .order('name')
+    
+    const activeList = activeData ?? []
+    setCarts(activeList)
+
+    // טעינת עגלות מחוקות לוגית ישירות מטבלת carts
+    const { data: deletedData } = await supabase
+      .from('carts')
+      .select('*')
+      .not('deleted_at', 'is', null)
+      .order('name')
+
+    if (deletedData) {
+      const enrichedDeleted = await Promise.all(
+        deletedData.map(async (c) => {
+          const { count } = await supabase
+            .from('devices')
+            .select('*', { count: 'exact', head: true })
+            .eq('cart_id', c.id)
+          return { ...c, registered_devices: count ?? 0 }
+        })
+      )
+      setDeletedCarts(enrichedDeleted)
+    } else {
+      setDeletedCarts([])
+    }
+
+    // בחירת עגלה ראשונה פעילה במידה ואין עגלה נבחרת או שהעגלה שנבחרה נמחקה
+    if (activeList.length) {
+      if (!selectedCart || !activeList.some(c => c.id === selectedCart.id)) {
+        setSelectedCart(activeList[0])
+      }
+    } else {
+      setSelectedCart(null)
+    }
+    
     setLoading(false)
   }
 
   async function loadDevices(cartId) {
-    const { data } = await supabase
-      .from('devices').select(`
-        *,
-        device_loans!inner(id, student_id, checkout_at, checkin_at, status,
-          students(name, class_name))
-      `)
-      .eq('cart_id', cartId)
-      .order('device_number')
+    if (!cartId) return
 
-    // Get all devices including those without active loans
+    // שליפת מכשירים שלא נמחקו לוגית בעגלה זו
     const { data: allDevices } = await supabase
       .from('devices')
       .select('*')
       .eq('cart_id', cartId)
+      .is('deleted_at', null)
       .order('device_number')
 
-    // Enrich with active loan info
+    // שליפת השאלות פעילות
     const { data: activeLoans } = await supabase
       .from('unreturned_loans')
       .select('*')
@@ -123,6 +161,85 @@ export default function Carts() {
     loadCarts()
   }
 
+  // מחיקה לוגית של עגלה וכל המחשבים שלה
+  async function softDeleteCart(cartId) {
+    setError(''); setSaving(true)
+    const now = new Date().toISOString()
+
+    const { error: errCart } = await supabase
+      .from('carts')
+      .update({ deleted_at: now })
+      .eq('id', cartId)
+
+    if (errCart) {
+      setError(errCart.message)
+      setSaving(false)
+      return
+    }
+
+    const { error: errDevices } = await supabase
+      .from('devices')
+      .update({ deleted_at: now })
+      .eq('cart_id', cartId)
+
+    setSaving(false)
+    if (errDevices) {
+      setError(errDevices.message)
+      return
+    }
+
+    setCartToDelete(null)
+    loadCarts()
+  }
+
+  // שחזור עגלה וכל המחשבים שלה
+  async function restoreCart(cartId) {
+    setError(''); setSaving(true)
+
+    const { error: errCart } = await supabase
+      .from('carts')
+      .update({ deleted_at: null })
+      .eq('id', cartId)
+
+    if (errCart) {
+      setError(errCart.message)
+      setSaving(false)
+      return
+    }
+
+    const { error: errDevices } = await supabase
+      .from('devices')
+      .update({ deleted_at: null })
+      .eq('cart_id', cartId)
+
+    setSaving(false)
+    if (errDevices) {
+      setError(errDevices.message)
+      return
+    }
+
+    loadCarts()
+  }
+
+  // מחיקה סופית לצמיתות של עגלה (מחיקה משורשרת של המחשבים מבוצעת ע"י ON DELETE CASCADE)
+  async function hardDeleteCart(cartId) {
+    setError(''); setSaving(true)
+
+    const { error: errCart } = await supabase
+      .from('carts')
+      .delete()
+      .eq('id', cartId)
+
+    setSaving(false)
+    if (errCart) {
+      setError(errCart.message)
+      return
+    }
+
+    setCartToHardDelete(null)
+    loadCarts()
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -133,46 +250,124 @@ export default function Carts() {
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20 }}>
         {/* Carts list */}
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h3 style={{ fontWeight: 700, fontSize: '0.95rem' }}>עגלות</h3>
-            <button className="btn btn-primary btn-sm" onClick={() => setShowAddCart(true)}>+ הוסף</button>
+          {/* Header & Tabs */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+            <div className="flex items-center justify-between">
+              <h3 style={{ fontWeight: 800, fontSize: '0.95rem' }}>עגלות</h3>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowAddCart(true)}>+ הוסף</button>
+            </div>
+            
+            <div style={{ display: 'flex', background: 'var(--bg-light)', padding: 4, borderRadius: 8, gap: 4 }}>
+              <button 
+                className={`btn btn-sm ${!viewDeleted ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ flex: 1, padding: '6px 8px', fontSize: '0.8rem', borderRadius: 6 }}
+                onClick={() => setViewDeleted(false)}
+              >
+                📁 פעילות ({carts.length})
+              </button>
+              <button 
+                className={`btn btn-sm ${viewDeleted ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ flex: 1, padding: '6px 8px', fontSize: '0.8rem', borderRadius: 6, color: viewDeleted ? '#fff' : 'var(--danger-light)' }}
+                onClick={() => setViewDeleted(true)}
+              >
+                ♻️ סל מיחזור ({deletedCarts.length})
+              </button>
+            </div>
           </div>
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {loading ? <div className="loading-center"><div className="spinner" /></div> :
-              carts.map(cart => (
-                <div
-                  key={cart.id}
-                  className="card"
-                  style={{
-                    cursor: 'pointer', padding: '14px 16px',
-                    borderColor: selectedCart?.id === cart.id ? 'var(--accent)' : undefined,
-                    background: selectedCart?.id === cart.id ? 'var(--accent-glow)' : undefined,
-                  }}
-                  onClick={() => setSelectedCart(cart)}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <div style={{ fontWeight: 700 }}>{cart.display_name || cart.name}</div>
-                    <button 
-                      className="btn btn-ghost btn-sm" 
-                      style={{ padding: '2px 6px', fontSize: '0.8rem', color: 'var(--text-muted)' }}
-                      onClick={(e) => { e.stopPropagation(); openEditModal(cart); }}
-                    >✏️</button>
+              !viewDeleted ? (
+                carts.map(cart => (
+                  <div
+                    key={cart.id}
+                    className="card"
+                    style={{
+                      cursor: 'pointer', padding: '14px 16px',
+                      borderColor: selectedCart?.id === cart.id ? 'var(--accent)' : undefined,
+                      background: selectedCart?.id === cart.id ? 'var(--accent-glow)' : undefined,
+                    }}
+                    onClick={() => setSelectedCart(cart)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <div style={{ fontWeight: 700 }}>{cart.display_name || cart.name}</div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button 
+                          className="btn btn-ghost btn-sm" 
+                          style={{ padding: '2px 6px', fontSize: '0.8rem', color: 'var(--text-muted)' }}
+                          onClick={(e) => { e.stopPropagation(); openEditModal(cart); }}
+                          title="ערוך עגלה"
+                        >✏️</button>
+                        <button 
+                          className="btn btn-ghost btn-sm" 
+                          style={{ padding: '2px 6px', fontSize: '0.8rem', color: 'var(--danger-light)' }}
+                          onClick={(e) => { e.stopPropagation(); setCartToDelete(cart); }}
+                          title="העבר לסל מיחזור"
+                        >🗑️</button>
+                      </div>
+                    </div>
+                    {cart.display_name && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>שם מערכת: {cart.name}</div>}
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>{cart.location || 'אין מיקום'}</div>
+                    <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                      <span className="badge badge-success">{cart.available_devices ?? 0} זמין</span>
+                      <span className="badge badge-warning">{cart.active_loans ?? 0} נלקח</span>
+                    </div>
                   </div>
-                  {cart.display_name && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>שם מערכת: {cart.name}</div>}
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>{cart.location || 'אין מיקום'}</div>
-                  <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
-                    <span className="badge badge-success">{cart.available_devices ?? 0} זמין</span>
-                    <span className="badge badge-warning">{cart.active_loans ?? 0} נלקח</span>
+                ))
+              ) : (
+                deletedCarts.map(cart => (
+                  <div
+                    key={cart.id}
+                    className="card"
+                    style={{
+                      padding: '14px 16px',
+                      borderColor: 'var(--border)',
+                      background: 'var(--bg-light)',
+                      opacity: 0.9
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <div style={{ fontWeight: 700, color: 'var(--text-muted)' }}>{cart.display_name || cart.name}</div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button 
+                          className="btn btn-ghost btn-sm" 
+                          style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--success-light)', border: '1px solid var(--border)' }}
+                          onClick={() => restoreCart(cart.id)}
+                          title="שחזר עגלה ומחשבים"
+                        >🔄</button>
+                        <button 
+                          className="btn btn-ghost btn-sm" 
+                          style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--danger-light)', border: '1px solid var(--border)' }}
+                          onClick={() => setCartToHardDelete(cart)}
+                          title="מחק לצמיתות מהמערכת"
+                        >🗑️</button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{cart.location || 'אין מיקום'}</div>
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ fontSize: '0.75rem', color: '#ff8a8a', fontWeight: 600 }}>
+                        📦 {cart.registered_devices ?? 0} מחשבים ימחקו
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                        נמחק ב: {new Date(cart.deleted_at).toLocaleString('he-IL')}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))
+                ))
+              )
             }
+            {!loading && !viewDeleted && carts.length === 0 && (
+              <div className="empty-state" style={{ padding: '20px 10px' }}><p>אין עגלות פעילות</p></div>
+            )}
+            {!loading && viewDeleted && deletedCarts.length === 0 && (
+              <div className="empty-state" style={{ padding: '20px 10px' }}><p>סל המיחזור ריק ♻️</p></div>
+            )}
           </div>
         </div>
 
         {/* Devices */}
         <div>
-          {selectedCart ? (
+          {selectedCart && !viewDeleted ? (
             <>
               <div className="flex items-center justify-between mb-4">
                 <h3 style={{ fontWeight: 700 }}>{selectedCart.display_name || selectedCart.name} – מחשבים</h3>
@@ -223,6 +418,14 @@ export default function Carts() {
                 )}
               </div>
             </>
+          ) : viewDeleted ? (
+            <div className="empty-state">
+              <div className="empty-icon">♻️</div>
+              <p style={{ fontWeight: 600 }}>סל המיחזור פעיל</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
+                בחר בלשונית "פעילות" כדי לנהל את המחשבים בעגלות הפעילות, או שחזר עגלה מסל המיחזור.
+              </p>
+            </div>
           ) : (
             <div className="empty-state"><div className="empty-icon">🛒</div><p>בחר עגלה מהרשימה</p></div>
           )}
@@ -323,6 +526,79 @@ export default function Carts() {
                 <button type="button" className="btn btn-ghost" onClick={() => setShowAddDevice(false)}>ביטול</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* מודאל אזהרת מחיקה לוגית - העברה לסל המיחזור */}
+      {cartToDelete && (
+        <div className="modal-overlay" onClick={() => setCartToDelete(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 450 }}>
+            <div className="modal-header" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+              <h3 className="modal-title" style={{ fontSize: '1.2rem', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                ⚠️ מחיקת עגלה והעברה לסל מיחזור
+              </h3>
+              <button className="modal-close" onClick={() => setCartToDelete(null)}>✕</button>
+            </div>
+            <div style={{ padding: '20px' }}>
+              <p style={{ margin: 0, lineHeight: 1.6, fontSize: '0.95rem' }}>
+                האם אתה בטוח שברצונך למחוק את עגלה <strong>"{cartToDelete.display_name || cartToDelete.name}"</strong>?
+              </p>
+              <p style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                פעולה זו תעביר את העגלה ואת <strong>כל המחשבים המשויכים אליה</strong> לסל המיחזור.
+                העגלה והמחשבים יושבתו זמנית, אך תוכל לשחזר אותם בכל עת מתוך סל המיחזור.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }}
+                onClick={() => softDeleteCart(cartToDelete.id)}
+                disabled={saving}
+              >
+                {saving ? '⏳...' : '🗑️ העבר לסל מיחזור'}
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => setCartToDelete(null)}>ביטול</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* מודאל אזהרת מחיקה פיזית - מחיקה סופית לצמיתות */}
+      {cartToHardDelete && (
+        <div className="modal-overlay" onClick={() => setCartToHardDelete(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 450, border: '1px solid #ff4d4d' }}>
+            <div className="modal-header" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+              <h3 className="modal-title" style={{ fontSize: '1.2rem', color: '#ff4d4d', display: 'flex', alignItems: 'center', gap: 8 }}>
+                🚨 מחיקה סופית ולצמיתות!
+              </h3>
+              <button className="modal-close" onClick={() => setCartToHardDelete(null)}>✕</button>
+            </div>
+            <div style={{ padding: '20px' }}>
+              <p style={{ margin: 0, lineHeight: 1.6, fontSize: '0.95rem', color: '#ff4d4d', fontWeight: 600 }}>
+                אזהרה: פעולה זו היא בלתי הפיכה!
+              </p>
+              <p style={{ marginTop: 8, lineHeight: 1.6, fontSize: '0.95rem' }}>
+                האם אתה בטוח שברצונך למחוק לצמיתות את עגלה <strong>"{cartToHardDelete.display_name || cartToHardDelete.name}"</strong>?
+              </p>
+              <p style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                עגלה זו וכל <strong>{cartToHardDelete.registered_devices ?? 0} המחשבים שלה יימחקו פיזית</strong> משרתי המערכת לצמיתות. 
+                לא ניתן יהיה לשחזר אותם שוב בעתיד!
+              </p>
+            </div>
+            <div className="modal-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                style={{ background: '#d32f2f', borderColor: '#d32f2f' }}
+                onClick={() => hardDeleteCart(cartToHardDelete.id)}
+                disabled={saving}
+              >
+                {saving ? '⏳...' : '🔥 מחק לצמיתות'}
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => setCartToHardDelete(null)}>ביטול</button>
+            </div>
           </div>
         </div>
       )}

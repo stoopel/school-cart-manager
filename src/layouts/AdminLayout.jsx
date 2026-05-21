@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 
 const NAV_MANAGE = [
   { label: 'דשבורד',           icon: '📊', to: '/admin/dashboard' },
@@ -54,7 +55,24 @@ export default function AdminLayout() {
         </nav>
 
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          <button 
+            onClick={() => supabase.auth.signOut()} 
+            style={{
+              width: '100%',
+              padding: '10px 0',
+              background: 'rgba(239,68,68,0.1)',
+              color: '#fca5a5',
+              border: 'none',
+              borderRadius: 10,
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              fontFamily: 'Heebo, sans-serif'
+            }}
+          >
+            🔒 התנתק
+          </button>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8, textAlign: 'center' }}>
             גרסה 1.0.0
           </div>
         </div>

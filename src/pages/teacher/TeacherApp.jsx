@@ -361,15 +361,10 @@ function TeacherLogin({ onLogin }) {
   async function submit(e) {
     e.preventDefault()
     setError(''); setLoading(true)
-    const { data } = await supabase
-      .from('teachers')
-      .select('id,name,national_id')
-      .eq('national_id', id.trim())
-      .eq('is_active', true)
-      .single()
+    const { data, error: rpcError } = await supabase.rpc('verify_teacher_id', { entered_id: id.trim() })
     setLoading(false)
-    if (!data) { setError('תעודת זהות לא נמצאה במערכת.'); return }
-    onLogin(data)
+    if (rpcError || !data || !data.is_valid) { setError('תעודת זהות לא נמצאה במערכת.'); return }
+    onLogin({ id: data.teacher_id, name: data.teacher_name })
   }
 
   return (

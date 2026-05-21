@@ -122,10 +122,17 @@ try {
 # 3. Create Local Installation Directory and Copy Files
 Write-Host ""
 Write-Host "Preparing local installation folder..." -ForegroundColor Cyan
-$localDir = "C:\CartAgent"
+$localDir = "C:\Program Files\CartAgent"
 if (-not (Test-Path $localDir)) {
     New-Item -ItemType Directory -Path $localDir -Force | Out-Null
 }
+
+# Apply strict folder permissions (ACLs) to prevent tampering
+Write-Host "Applying secure ACL permissions to $localDir..." -ForegroundColor Cyan
+icacls.exe "$localDir" /inheritance:d | Out-Null
+icacls.exe "$localDir" /grant:r "SYSTEM:(OI)(CI)(F)" | Out-Null
+icacls.exe "$localDir" /grant:r "Administrators:(OI)(CI)(F)" | Out-Null
+icacls.exe "$localDir" /grant:r "Users:(OI)(CI)(RX)" | Out-Null
 
 # Find Executable on USB
 $sourceExe = Join-Path $PSScriptRoot "dist\cart_agent.exe"

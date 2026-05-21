@@ -93,12 +93,49 @@ export default function TakeLaptop({ cart, onDone }) {
     const scanner = new Html5QrcodeScanner('qr-reader-take', { fps: 10, qrbox: { width: 220, height: 220 } }, false)
     scanner.render(onQRSuccess, () => {})
     scannerRef.current = scanner
-    return () => { scanner.clear().catch(() => {}) }
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.clear().catch(() => {})
+        scannerRef.current = null
+      }
+    }
   }, [step, scanMode])
 
   async function onQRSuccess(decodedText) {
-    if (scannerRef.current) { scannerRef.current.clear().catch(() => {}); scannerRef.current = null }
+    if (scannerRef.current) {
+      try {
+        await scannerRef.current.clear()
+      } catch (e) {
+        console.error('Failed to clear scanner on success:', e)
+      }
+      scannerRef.current = null
+    }
     await processDevice(decodedText)
+  }
+
+  async function safeSetScanMode(newMode) {
+    if (scanMode === 'qr' && scannerRef.current) {
+      try {
+        await scannerRef.current.clear()
+      } catch (e) {
+        console.error('Error clearing scanner on mode switch:', e)
+      }
+      scannerRef.current = null
+    }
+    setScanMode(newMode)
+  }
+
+  async function safeGoBackToId() {
+    if (scanMode === 'qr' && scannerRef.current) {
+      try {
+        await scannerRef.current.clear()
+      } catch (e) {
+        console.error('Error clearing scanner on back action:', e)
+      }
+      scannerRef.current = null
+    }
+    setStep(STEPS.ID)
+    setIdValue('')
   }
 
   async function processDevice(deviceId) {
@@ -196,7 +233,7 @@ export default function TakeLaptop({ cart, onDone }) {
   if (step === STEPS.SCAN) return (
     <div className="station-flow">
       <div className="station-flow-header">
-        <button className="station-back-btn" onClick={() => { setStep(STEPS.ID); setIdValue(''); }}>← חזרה</button>
+        <button className="station-back-btn" onClick={safeGoBackToId}>← חזרה</button>
         <span className="station-flow-title">שלום, {student?.name}! בחר מחשב</span>
       </div>
       <div className="station-flow-body">
@@ -204,11 +241,11 @@ export default function TakeLaptop({ cart, onDone }) {
         <div className="flex gap-3">
           <button
             className={`btn ${scanMode === 'qr' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setScanMode('qr')}
+            onClick={() => safeSetScanMode('qr')}
           >📷 סריקת QR</button>
           <button
             className={`btn ${scanMode === 'number' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setScanMode('number')}
+            onClick={() => safeSetScanMode('number')}
           >🔢 הקלדת מספר</button>
         </div>
 

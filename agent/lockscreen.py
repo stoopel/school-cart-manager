@@ -665,9 +665,9 @@ class LockScreen:
         """נועל חזרה – נקרא כשהשאלה נסגרת מרחוק"""
         self._unlocked = False
         self.entered_id = ""
-        install_keyboard_hook()
-        set_task_manager_enabled(False)
         def _do():
+            install_keyboard_hook()
+            set_task_manager_enabled(False)
             self.lbl_display.config(text="")
             self.root.deiconify()
             self.root.attributes("-topmost", True)
@@ -684,8 +684,10 @@ class LockScreen:
     def unfreeze(self):
         """חדש עדכוני UI לאחר התעוררות"""
         self._frozen = False
-        self._update_clock()
-        self.root.after(0, self.root.focus_force)
+        def _do():
+            self._update_clock()
+            self.root.focus_force()
+        self.root.after(0, _do)
 
     def run(self):
         self.root.mainloop()

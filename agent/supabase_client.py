@@ -133,11 +133,11 @@ def log_event(device_id, loan_id, event_type, payload=None):
 # ─── מורים ────────────────────────────────────────────────────
 
 def is_teacher(national_id: str) -> dict | None:
-    """מחזיר רשומת מורה אם ת.ז. שייכת למורה פעיל"""
-    rows = _get("teachers", {"national_id": f"eq.{national_id}",
-                              "is_active": "eq.true",
-                              "select": "id,name"})
-    return rows[0] if rows else None
+    """מחזיר רשומת מורה אם ת.ז. שייכת למורה פעיל באמצעות RPC מאובטח"""
+    res = _rpc("verify_teacher_id", {"entered_id": national_id})
+    if res and res.get("is_valid"):
+        return {"id": res.get("teacher_id"), "name": res.get("teacher_name")}
+    return None
 
 
 # ─── שיעורים ──────────────────────────────────────────────────
@@ -152,13 +152,11 @@ def get_active_lesson_by_code(lesson_code: str) -> dict | None:
     if not rows: return None
     lesson = rows[0]
 
-    # שלוף server NOW() לחישוב offset מדויק
-    server_now_rows = _get("lessons",
-                            {"id": f"eq.{lesson['id']}",
-                             "select": "id,end_time,start_time,is_locked"})
-    if not server_now_rows: return None
+    # שלוף server NOW() לחישוב offset מדויק באמצעות RPC
+    server_now = _rpc("get_server_time", {})
+    if not server_now:
+        server_now = datetime.utcnow().isoformat() + "Z"
 
-    # Supabase REST לא חושף NOW() ישירות – נשתמש בזמן החזרה + latency קטן
     return {
         "lesson_id":       lesson["id"],
         "end_time":        lesson["end_time"],
@@ -166,6 +164,7 @@ def get_active_lesson_by_code(lesson_code: str) -> dict | None:
         "teacher_name":    lesson.get("teacher_name", ""),
         "subject":         lesson.get("subject", ""),
         "minutes_remaining": lesson.get("minutes_remaining", 0),
+        "server_now":      server_now,
     }
 
 def get_lesson_server_time(lesson_id: str) -> dict | None:

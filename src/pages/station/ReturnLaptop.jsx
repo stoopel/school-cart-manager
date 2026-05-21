@@ -61,9 +61,15 @@ export default function ReturnLaptop({ cart, onDone }) {
     qrCode.start(
       { facingMode: 'user' },
       { fps: 10, qrbox: { width: 220, height: 220 } },
-      (decodedText) => {
-        qrCode.stop().catch(() => {})
-        scannerRef.current = null
+      async (decodedText) => {
+        if (scannerRef.current) {
+          try {
+            await scannerRef.current.stop()
+          } catch (e) {
+            console.error('Error stopping scanner inside success callback:', e)
+          }
+          scannerRef.current = null
+        }
         onQRSuccess(decodedText)
       },
       () => {} // שגיאות סריקה – מתעלמים
@@ -78,6 +84,30 @@ export default function ReturnLaptop({ cart, onDone }) {
 
   async function onQRSuccess(decodedText) {
     await lookupDevice(decodedText)
+  }
+
+  async function safeSetScanMode(newMode) {
+    if (scanMode === 'qr' && scannerRef.current) {
+      try {
+        await scannerRef.current.stop()
+      } catch (e) {
+        console.error('Error stopping scanner on mode switch:', e)
+      }
+      scannerRef.current = null
+    }
+    setScanMode(newMode)
+  }
+
+  async function safeGoBack() {
+    if (scanMode === 'qr' && scannerRef.current) {
+      try {
+        await scannerRef.current.stop()
+      } catch (e) {
+        console.error('Error stopping scanner on back action:', e)
+      }
+      scannerRef.current = null
+    }
+    onDone()
   }
 
   async function lookupDevice(deviceIdOrNumber) {
@@ -134,13 +164,13 @@ export default function ReturnLaptop({ cart, onDone }) {
   if (step === STEPS.SCAN) return (
     <div className="station-flow">
       <div className="station-flow-header">
-        <button className="station-back-btn" onClick={onDone}>← חזרה</button>
+        <button className="station-back-btn" onClick={safeGoBack}>← חזרה</button>
         <span className="station-flow-title">📤 החזרת מחשב</span>
       </div>
       <div className="station-flow-body">
         <div className="flex gap-3">
-          <button className={`btn ${scanMode === 'qr' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setScanMode('qr')}>📷 סריקת QR</button>
-          <button className={`btn ${scanMode === 'number' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setScanMode('number')}>🔢 הקלדת מספר</button>
+          <button className={`btn ${scanMode === 'qr' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => safeSetScanMode('qr')}>📷 סריקת QR</button>
+          <button className={`btn ${scanMode === 'number' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => safeSetScanMode('number')}>🔢 הקלדת מספר</button>
         </div>
 
         {errorMsg && <div className="station-error">{errorMsg}</div>}

@@ -72,16 +72,17 @@ def is_connected():
 class LessonTimer:
     """
     מנהל countdown של שיעור.
-    משתמש ב-offset בין זמן שרת לזמן מקומי לדיוק מרבי.
+    משתמש ב-offset בין זמן שרת לזמן מקומי לדיוק מרבי ומעקב מונוטוני למניעת עקיפת שעון.
     """
     def __init__(self, end_time_str: str, server_now_str: str = None):
         self.end_time = self._parse(end_time_str)
-        if server_now_str:
-            server_now  = self._parse(server_now_str)
-            local_now   = datetime.now(timezone.utc)
-            self.offset = (server_now - local_now).total_seconds()
-        else:
-            self.offset = 0.0
+        server_now = self._parse(server_now_str) if server_now_str else datetime.now(timezone.utc)
+        local_now = datetime.now(timezone.utc)
+        self.offset = (server_now - local_now).total_seconds()
+        
+        # מעקב מונוטוני בטוח למניעת מניפולציות שעון מקומיות
+        self.start_mono = time.monotonic()
+        self.expected_remaining_at_start = (self.end_time - server_now).total_seconds()
 
     def _parse(self, s):
         s = s.replace("Z", "+00:00")
@@ -91,6 +92,17 @@ class LessonTimer:
         local_now    = datetime.now(timezone.utc)
         adjusted_now = local_now + __import__('datetime').timedelta(seconds=self.offset)
         return (self.end_time - adjusted_now).total_seconds()
+
+    def check_time_manipulation(self) -> bool:
+        """מזהה האם התלמיד שינה את השעון המקומי כדי להאריך את זמן השיעור"""
+        elapsed_mono = time.monotonic() - self.start_mono
+        expected_current_remaining = self.expected_remaining_at_start - elapsed_mono
+        system_remaining = self.remaining_seconds()
+        
+        # אם הסטייה בין הנותר המצופה (לפי מונוטוני) לנותר המחושב גדולה מ-15 שניות, זו מניפולציה
+        if abs(system_remaining - expected_current_remaining) > 15.0:
+            return True
+        return False
 
     def is_expired(self) -> bool:
         return self.remaining_seconds() <= 0
@@ -221,13 +233,10 @@ class CartAgent:
         )
         if joined:
             log.info(f"Joined lesson {lesson['lesson_id']}")
-            # הגדר טיימר – offset: אנחנו יודעים כמה דקות נשאר
-            mins = lesson.get("minutes_remaining", 0)
-            from datetime import timedelta
-            pseudo_end = datetime.now(timezone.utc) + timedelta(minutes=mins)
+            # הגדר טיימר עם ה-end_time וזמן השרת האמיתי
             self._lesson_timer = LessonTimer(
-                pseudo_end.isoformat(),
-                server_now_str=None
+                lesson["end_time"],
+                server_now_str=lesson.get("server_now")
             )
             # Realtime לשיעור
             self._start_lesson_realtime(lesson["lesson_id"])
@@ -296,6 +305,15 @@ class CartAgent:
             if not self._lesson_timer or not self._unlocked:
                 warned = False
                 continue
+            
+            # בדיקת מניפולציה של זמן שעון מערכת
+            if self._lesson_timer.check_time_manipulation():
+                log.warning("System clock manipulation detected! Force locking device.")
+                self._unlocked = False
+                if self.screen:
+                    self.screen.relock("⚠️ אזהרת אבטחה: זוהה שינוי בשעון המערכת. המחשב ננעל.")
+                continue
+
             remaining = self._lesson_timer.remaining_seconds()
 
             # אזהרת 5 דקות
@@ -392,20 +410,27 @@ class CartAgent:
 
     def _idle_loop(self):
         last_check = time.time()
+        last_mono = time.monotonic()
         while self._running:
             time.sleep(5)
             try:
                 now     = time.time()
-                elapsed = now - last_check
+                now_mono = time.monotonic()
+                elapsed_time = now - last_check
+                elapsed_mono = now_mono - last_mono
 
-                if elapsed > WAKE_GAP_SEC:
-                    log.info(f"Wake detected (gap={elapsed:.0f}s)")
+                # זיהוי התעוררות משינה אמיתית: מעבר זמן שעון מערכת גדול אך מעבר זמן מונוטוני קטן (כי הוא עוצר בשינה)
+                if elapsed_time > 60.0 and elapsed_mono < 15.0:
+                    log.info(f"Wake detected (time gap={elapsed_time:.0f}s, mono gap={elapsed_mono:.1f}s)")
                     self._frozen = False
                     if self.screen: self.screen.unfreeze()
                     self._check_charging_after_wake()
-                    self._refresh_loan_state(f"wake {elapsed:.0f}s")
+                    self._refresh_loan_state(f"wake {elapsed_time:.0f}s")
+                elif elapsed_time > 60.0:
+                    log.info(f"CPU Lag detected (time gap={elapsed_time:.0f}s, mono gap={elapsed_mono:.1f}s). Skipping sleep wake checks.")
 
                 last_check = now
+                last_mono = now_mono
 
                 if get_idle_seconds() >= IDLE_TIMEOUT and not self._frozen:
                     log.info("Idle → sleep")

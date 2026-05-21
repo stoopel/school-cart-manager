@@ -11,6 +11,7 @@ import StationHome from './pages/station/StationHome'
 import TeacherApp  from './pages/teacher/TeacherApp'
 import LandingPage from './pages/LandingPage'
 import AdminLogin  from './components/AdminLogin'
+import AllowedAdmins from './pages/admin/AllowedAdmins'
 import './index.css'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="carts"     element={<Carts />} />
           <Route path="loans"     element={<Loans />} />
           <Route path="labels"    element={<Labels />} />
+          <Route path="admins"    element={<AllowedAdmins />} />
         </Route>
 
         {/* תחנת עגלה – Kiosk */}

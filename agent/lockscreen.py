@@ -351,6 +351,8 @@ class LockScreen:
         self._step      = 1        # 1=ת.ז.  2=קוד שיעור
         self._verify         = lambda x: None
         self._verify_lesson  = lambda x: None
+        self._wifi_panel_active = False
+        self._wifi_timer_id = None
 
         self.root = tk.Tk()
         self._setup_window()
@@ -574,21 +576,47 @@ class LockScreen:
         """נקרא מ-Thread חיצוני לעדכון אינדיקטור ה-Wi-Fi"""
         color = SUCCESS if connected else ERROR
         text  = label or ("מחובר לאינטרנט ✓" if connected else "אין חיבור לאינטרנט")
-        self.root.after(0, lambda: [
-            self.wifi_dot.config(fg=color),
-            self.wifi_label.config(text=text, fg=color if connected else TEXT_DIM),
-        ])
+        
+        def _do():
+            self.wifi_dot.config(fg=color)
+            self.wifi_label.config(text=text, fg=color if connected else TEXT_DIM)
+            
+            # אם תלמיד בחר רשת והתחבר בהצלחה, נחזיר את חלון הנעילה לקדמת המסך מיד
+            if connected and getattr(self, '_wifi_panel_active', False):
+                self._wifi_panel_active = False
+                if getattr(self, '_wifi_timer_id', None):
+                    try: self.root.after_cancel(self._wifi_timer_id)
+                    except: pass
+                    self._wifi_timer_id = None
+                self.root.attributes("-topmost", True)
+                self.root.focus_force()
+                self.show_status("החיבור האלחוטי בוצע בהצלחה! 📶", SUCCESS)
+                
+        self.root.after(0, _do)
 
     def _open_wifi_panel(self):
         """פותח את תפריט בחירת הרשתות של Windows"""
-        # מוריד topmost זמנית כדי שתפריט Windows יופיע מעל
+        self._wifi_panel_active = True
         self.root.attributes("-topmost", False)
         try:
             os.system("start ms-availablenetworks:")
         except Exception:
             subprocess.Popen(["explorer.exe", "ms-availablenetworks:"])
-        # מחזיר topmost אחרי 10 שניות
-        self.root.after(10000, lambda: self.root.attributes("-topmost", True))
+            
+        # ביטול טיימר קודם אם קיים
+        if getattr(self, '_wifi_timer_id', None):
+            try: self.root.after_cancel(self._wifi_timer_id)
+            except: pass
+            
+        # מחזיר topmost אחרי דקה אחת לכל היותר (גיבוי בטיחותי)
+        self._wifi_timer_id = self.root.after(60000, self._restore_topmost_safety)
+
+    def _restore_topmost_safety(self):
+        if getattr(self, '_wifi_panel_active', False):
+            self._wifi_panel_active = False
+            self._wifi_timer_id = None
+            self.root.attributes("-topmost", True)
+            self.root.focus_force()
 
     # ── Public API ────────────────────────────────────────────
 

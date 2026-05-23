@@ -525,7 +525,7 @@ class CartAgent:
                     self.screen.update_wifi_status(connected)
             except Exception as e:
                 log.error(f"Wi-Fi: {e}")
-            time.sleep(10)
+            time.sleep(3)
 
 
 if __name__ == "__main__":

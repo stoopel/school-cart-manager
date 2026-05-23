@@ -151,7 +151,7 @@ class CartAgent:
     def _verify_step1_id(self, entered: str):
         log.info(f"Step1 ID: {entered[:3]}***")
 
-        # קוד אדמין
+        # 1. קוד אדמין - מעקף חירום פיזי מוחלט (מנהל מערכת)
         is_admin = False
         if ADMIN_CODE and entered == ADMIN_CODE:
             is_admin = True
@@ -162,30 +162,17 @@ class CartAgent:
                 is_admin = True
 
         if is_admin:
-            log.info("Admin code – bypassing lesson")
+            log.info("Admin code – bypassing loan and lesson checks")
             self._teacher_bypass = True
             self._do_unlock("מנהל מערכת")
             return
 
-        # ת.ז. מורה
-        teacher = db.is_teacher(entered)
-        if teacher:
-            log.info(f"Teacher login: {teacher['name']}")
-            self._teacher_bypass = True
-            if self.device_id:
-                db.log_event(self.device_id, self.loan_data["loan_id"] if self.loan_data else None,
-                             "teacher_login", {"name": teacher["name"]})
-            self._do_unlock(teacher["name"])
-            return
-
-        self._teacher_bypass = False
-
-        # אין השאלה
+        # 2. אין השאלה פעילה - חסימה גורפת (לכולם חוץ מאדמין)
         if not self.loan_data:
             self.screen.show_status("פנה לתחנת העגלה לפני השימוש.", "#f59e0b")
             return
 
-        # בדיקת strikes
+        # 3. בדיקת strikes (עונשי אי-טעינה)
         strikes = self.loan_data.get("charge_strikes", 0)
         if strikes >= MAX_STRIKES:
             self.screen.show_status(
@@ -197,7 +184,7 @@ class CartAgent:
         elif strikes == 1:
             self.screen.show_status("⚠️ שים לב: לא חיברת מחשב לטעינה בפעם הקודמת.", "#fbbf24")
 
-        # ת.ז. תלמיד תקינה – עבור לשלב 2
+        # 4. וידוא התאמה מול מזהה ההשאלה הקיים
         if entered != self.loan_data["national_id"]:
             name = self.loan_data["student_name"]
             self.screen.show_status(f"שגיאה: מחשב זה שייך ל-{name}.", "#ef4444")
@@ -206,7 +193,20 @@ class CartAgent:
                              "auth_failed", {"prefix": entered[:3]})
             return
 
-        # ת.ז. נכונה → שלב 2: קוד שיעור
+        # 5. זיהוי האם מדובר במורה או תלמיד
+        teacher = db.is_teacher(entered)
+        if teacher:
+            # מורה - פתיחה מיידית ללא צורך בקוד שיעור
+            log.info(f"Teacher login: {teacher['name']}")
+            self._teacher_bypass = True
+            if self.device_id:
+                db.log_event(self.device_id, self.loan_data["loan_id"],
+                             "teacher_login", {"name": teacher["name"]})
+            self._do_unlock(teacher["name"])
+            return
+
+        # 6. תלמיד - מעבר לשלב 2: דרישת קוד שיעור פעיל
+        self._teacher_bypass = False
         self.screen.show_lesson_code_prompt()
 
     # ── Step 2: אימות קוד שיעור ──────────────────────────────

@@ -11,7 +11,7 @@ export default function Carts() {
   const [showAddCart, setShowAddCart]   = useState(false)
   const [showEditCart, setShowEditCart] = useState(false)
   const [showAddDevice, setShowAddDevice] = useState(false)
-  const [cartForm, setCartForm]   = useState({ id: '', name: '', display_name: '', location: '', total_devices: '' })
+  const [cartForm, setCartForm]   = useState({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '' })
   const [deviceForm, setDeviceForm] = useState({ device_number: '', asset_tag: '' })
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
@@ -127,31 +127,35 @@ export default function Carts() {
 
   async function addCart(e) {
     e.preventDefault(); setError(''); setSaving(true)
+    const code = cartForm.kiosk_code.trim() || String(Math.floor(1000 + Math.random() * 9000))
     const { error: err } = await supabase.from('carts').insert({
       name: cartForm.name.trim(),
       display_name: cartForm.display_name.trim() || null,
       location: cartForm.location.trim(),
       total_devices: Number(cartForm.total_devices) || 0,
+      kiosk_code: code
     })
     setSaving(false)
     if (err) { setError(err.message); return }
     setShowAddCart(false)
-    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '' })
+    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '' })
     loadCarts()
   }
 
   async function editCart(e) {
     e.preventDefault(); setError(''); setSaving(true)
+    const code = cartForm.kiosk_code.trim() || String(Math.floor(1000 + Math.random() * 9000))
     const { error: err } = await supabase.from('carts').update({
       display_name: cartForm.display_name.trim() || null,
       location: cartForm.location.trim(),
       total_devices: Number(cartForm.total_devices) || 0,
+      kiosk_code: code
     }).eq('id', cartForm.id)
     
     setSaving(false)
     if (err) { setError(err.message); return }
     setShowEditCart(false)
-    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '' })
+    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '' })
     loadCarts()
   }
 
@@ -161,7 +165,8 @@ export default function Carts() {
       name: cart.name,
       display_name: cart.display_name || '',
       location: cart.location || '',
-      total_devices: cart.total_devices || ''
+      total_devices: cart.total_devices || '',
+      kiosk_code: cart.kiosk_code || ''
     })
     setShowEditCart(true)
   }
@@ -491,6 +496,13 @@ export default function Carts() {
                 <label className="form-label">מספר מחשבים סך הכל</label>
                 <input className="form-input" type="number" value={cartForm.total_devices} onChange={e => setCartForm(f => ({ ...f, total_devices: e.target.value }))} placeholder="38" />
               </div>
+              <div className="form-group">
+                <label className="form-label">קוד גישה לקיוסק (4 ספרות)</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="form-input" style={{ flex: 1 }} value={cartForm.kiosk_code} onChange={e => setCartForm(f => ({ ...f, kiosk_code: e.target.value }))} placeholder="1234 (אופציונלי - ייווצר אוטומטית)" />
+                  <button type="button" className="btn btn-ghost" onClick={() => setCartForm(f => ({ ...f, kiosk_code: String(Math.floor(1000 + Math.random() * 9000)) }))}>🎲 חולל</button>
+                </div>
+              </div>
               <div className="modal-footer">
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? '⏳...' : '✅ הוסף'}</button>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowAddCart(false)}>ביטול</button>
@@ -526,6 +538,14 @@ export default function Carts() {
               <div className="form-group">
                 <label className="form-label">מספר מחשבים סך הכל</label>
                 <input className="form-input" type="number" value={cartForm.total_devices} onChange={e => setCartForm(f => ({ ...f, total_devices: e.target.value }))} placeholder="38" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">קוד גישה לקיוסק (4 ספרות)</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="form-input" style={{ flex: 1 }} value={cartForm.kiosk_code} onChange={e => setCartForm(f => ({ ...f, kiosk_code: e.target.value }))} placeholder="1234" required />
+                  <button type="button" className="btn btn-ghost" onClick={() => setCartForm(f => ({ ...f, kiosk_code: String(Math.floor(1000 + Math.random() * 9000)) }))}>🎲 חולל</button>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 4 }}>שינוי הקוד ינתק באופן מיידי את הטאבלט הפיזי של העגלה וידרוש הזנת הקוד החדש.</div>
               </div>
               <div className="modal-footer">
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? '⏳...' : '✅ שמור שינויים'}</button>

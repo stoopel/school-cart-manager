@@ -46,6 +46,10 @@ function quickTimes() {
 // ── Lesson Card ────────────────────────────────────────────────
 function LessonCard({ lesson, now, onRefresh }) {
   const [busy, setBusy] = useState(false)
+  const [showAssignModal, setShowAssignModal] = useState(false)
+  const [preAssigned, setPreAssigned] = useState([])
+  const [loadingAssign, setLoadingAssign] = useState(false)
+
   const isScheduled = lesson.status === 'scheduled'
   const startTs = new Date(lesson.start_time).getTime()
   const endTs   = new Date(lesson.end_time).getTime()
@@ -60,6 +64,44 @@ function LessonCard({ lesson, now, onRefresh }) {
         .then(() => onRefresh())
     }
   }, [isScheduled, secUntilStart <= 0])
+
+  const loadAssignments = useCallback(async () => {
+    setLoadingAssign(true)
+    const { data: lpa } = await supabase
+      .from('lesson_pre_assignments')
+      .select('student_id, students(name, class_name)')
+      .eq('lesson_id', lesson.id)
+
+    const { data: lp } = await supabase
+      .from('lesson_participants')
+      .select('student_id')
+      .eq('lesson_id', lesson.id)
+
+    const participantSet = new Set(lp?.map(p => p.student_id) ?? [])
+    
+    setPreAssigned((lpa ?? []).map(item => ({
+      student_id: item.student_id,
+      name: item.students?.name ?? 'תלמיד',
+      class_name: item.students?.class_name ?? '',
+      isPresent: participantSet.has(item.student_id)
+    })))
+    setLoadingAssign(false)
+  }, [lesson.id])
+
+  useEffect(() => {
+    loadAssignments()
+  }, [loadAssignments])
+
+  // Realtime update when students join the lesson
+  useEffect(() => {
+    const channel = supabase
+      .channel(`lesson-participants-${lesson.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lesson_participants', filter: `lesson_id=eq.${lesson.id}` }, () => {
+        loadAssignments()
+      })
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [lesson.id, loadAssignments])
 
   async function act(update) {
     setBusy(true)
@@ -175,6 +217,191 @@ function LessonCard({ lesson, now, onRefresh }) {
           🗑️ בטל שיעור
         </button>
       )}
+
+      {/* Pre-assign button */}
+      <button
+        onClick={() => setShowAssignModal(true)}
+        style={{
+          width: '100%', padding: '10px 0', borderRadius: 12, border: 'none',
+          cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'Heebo,sans-serif',
+          background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', marginTop: 12
+        }}
+      >
+        👤 שייך כיתה / קבוצה / תלמידים
+      </button>
+
+      {/* Live Attendance View */}
+      {preAssigned.length > 0 && (
+        <div style={{ marginTop: 20, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 16 }}>
+          <div style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 700, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+            <span>📋 נוכחות דיגיטלית חיה</span>
+            <span style={{ color: '#22c55e' }}>{preAssigned.filter(p => p.isPresent).length} / {preAssigned.length} נוכחים</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8, maxHeight: 120, overflowY: 'auto', paddingRight: 4 }}>
+            {preAssigned.map(p => (
+              <div key={p.student_id} style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.05)',
+                borderRadius: 8, padding: '6px 10px',
+                display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: '0.78rem',
+              }}>
+                <span style={{ color: p.isPresent ? '#22c55e' : '#ef4444', fontSize: '0.8rem' }}>●</span>
+                <span style={{ color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }} title={p.name}>
+                  {p.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Assign Modal component */}
+      {showAssignModal && (
+        <PreAssignModal
+          lesson={lesson}
+          onClose={() => setShowAssignModal(false)}
+          onRefresh={loadAssignments}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── PreAssignModal ─────────────────────────────────────────────
+function PreAssignModal({ lesson, onClose, onRefresh }) {
+  const [classes, setClasses] = useState([])
+  const [groups, setGroups] = useState([])
+  const [students, setStudents] = useState([])
+  const [selectedClass, setSelectedClass] = useState('')
+  const [selectedGroup, setSelectedGroup] = useState('')
+  const [selectedStudent, setSelectedStudent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    async function loadData() {
+      setLoading(true)
+      const { data: stuClasses } = await supabase.from('students').select('class_name')
+      const classSet = new Set(stuClasses?.map(s => s.class_name).filter(Boolean) ?? [])
+      setClasses(Array.from(classSet).sort())
+
+      const { data: grps } = await supabase.from('student_groups').select('id, name').order('name')
+      setGroups(grps ?? [])
+
+      const { data: stus } = await supabase.from('students').select('id, name, national_id, class_name').order('name')
+      setStudents(stus ?? [])
+      setLoading(false)
+    }
+    loadData()
+  }, [])
+
+  async function assignClass(e) {
+    e.preventDefault()
+    if (!selectedClass) return
+    setSaving(true)
+    const { data: classStus } = await supabase.from('students').select('id').eq('class_name', selectedClass)
+    if (classStus && classStus.length > 0) {
+      const records = classStus.map(s => ({ lesson_id: lesson.id, student_id: s.id }))
+      await supabase.from('lesson_pre_assignments').upsert(records, { onConflict: 'lesson_id,student_id' })
+    }
+    setSaving(false)
+    onRefresh()
+    onClose()
+  }
+
+  async function assignGroup(e) {
+    e.preventDefault()
+    if (!selectedGroup) return
+    setSaving(true)
+    const { data: groupStus } = await supabase.from('student_group_members').select('student_id').eq('group_id', selectedGroup)
+    if (groupStus && groupStus.length > 0) {
+      const records = groupStus.map(s => ({ lesson_id: lesson.id, student_id: s.student_id }))
+      await supabase.from('lesson_pre_assignments').upsert(records, { onConflict: 'lesson_id,student_id' })
+    }
+    setSaving(false)
+    onRefresh()
+    onClose()
+  }
+
+  async function assignStudent(e) {
+    e.preventDefault()
+    if (!selectedStudent) return
+    setSaving(true)
+    await supabase.from('lesson_pre_assignments').upsert({ lesson_id: lesson.id, student_id: selectedStudent }, { onConflict: 'lesson_id,student_id' })
+    setSaving(false)
+    onRefresh()
+    onClose()
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(5, 8, 16, 0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 9999, padding: 20, direction: 'rtl', fontFamily: 'Heebo, sans-serif'
+    }}>
+      <div style={{
+        background: '#0d1526', border: '1.5px solid rgba(99,102,241,0.3)', borderRadius: 20,
+        padding: 24, width: '100%', maxWidth: 440, display: 'flex', flexDirection: 'column', gap: 20,
+        boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ color: '#f1f5f9', margin: 0, fontSize: '1.15rem' }}>👤 שיוך תלמידים לשיעור</h3>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+        </div>
+
+        {loading ? (
+          <div style={{ color: '#64748b', textAlign: 'center', padding: 20 }}>טוען אפשרויות שיוך...</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            
+            {/* Class Option */}
+            <form onSubmit={assignClass} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 16 }}>
+              <label style={labelStyle}>שייך כיתה שלמה</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select style={{ ...inputStyle, flex: 1, padding: '10px 12px' }} value={selectedClass} onChange={e => setSelectedClass(e.target.value)}>
+                  <option value="">-- בחר כיתה --</option>
+                  {classes.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <button type="submit" disabled={saving || !selectedClass} style={{ ...btnStyle('#6366f1'), width: 'auto', padding: '0 16px', borderRadius: 12, height: 46 }}>שייך כיתה</button>
+              </div>
+            </form>
+
+            {/* Group Option */}
+            <form onSubmit={assignGroup} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 16 }}>
+              <label style={labelStyle}>שייך קבוצת למידה</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select style={{ ...inputStyle, flex: 1, padding: '10px 12px' }} value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)}>
+                  <option value="">-- בחר קבוצה --</option>
+                  {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+                <button type="submit" disabled={saving || !selectedGroup} style={{ ...btnStyle('#6366f1'), width: 'auto', padding: '0 16px', borderRadius: 12, height: 46 }}>שייך קבוצה</button>
+              </div>
+            </form>
+
+            {/* Individual Student Option */}
+            <form onSubmit={assignStudent} style={{ paddingBottom: 8 }}>
+              <label style={labelStyle}>שייך תלמיד בודד</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select style={{ ...inputStyle, flex: 1, padding: '10px 12px' }} value={selectedStudent} onChange={e => setSelectedStudent(e.target.value)}>
+                  <option value="">-- בחר תלמיד --</option>
+                  {students.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} (ת.ז. {s.national_id} {s.class_name ? `| ${s.class_name}` : ''})
+                    </option>
+                  ))}
+                </select>
+                <button type="submit" disabled={saving || !selectedStudent} style={{ ...btnStyle('#6366f1'), width: 'auto', padding: '0 16px', borderRadius: 12, height: 46 }}>שייך</button>
+              </div>
+            </form>
+
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+          <button onClick={onClose} style={{ ...btnStyle('rgba(255,255,255,0.07)'), width: 'auto', padding: '10px 24px', borderRadius: 12 }}>סגור</button>
+        </div>
+      </div>
     </div>
   )
 }

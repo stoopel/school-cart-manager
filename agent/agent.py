@@ -206,9 +206,58 @@ class CartAgent:
             self._do_unlock(teacher["name"])
             return
 
-        # 6. תלמיד - מעבר לשלב 2: דרישת קוד שיעור פעיל
+        # 6. תלמיד - בדיקה האם יש שיעור משויך מראש
         self._teacher_bypass = False
+        pre_assigned = db.check_pre_assigned_lessons(entered)
+        if pre_assigned:
+            if len(pre_assigned) == 1:
+                # שיעור יחיד - כניסה אוטומטית ישירה
+                lesson = pre_assigned[0]
+                self._lesson_data = lesson
+                joined = db.join_lesson(
+                    lesson["lesson_id"],
+                    self.loan_data["loan_id"],
+                    self.loan_data["device_id"],
+                    self.loan_data["student_id"],
+                )
+                if joined:
+                    log.info(f"Auto-joined pre-assigned active lesson {lesson['lesson_id']}")
+                    self._lesson_timer = LessonTimer(
+                        lesson["end_time"],
+                        server_now_str=lesson.get("server_now")
+                    )
+                    self._start_lesson_realtime(lesson["lesson_id"])
+                    db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
+                    self._do_unlock(self.loan_data["student_name"])
+                    return
+            else:
+                # מספר שיעורים במקביל - הצגת ממשק בחירה
+                log.info(f"Multiple pre-assigned active lessons found: {len(pre_assigned)}")
+                self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected)
+                return
+
+        # 7. לא נמצא שיוך מראש - דרישת קוד שיעור פעיל כרגיל
         self.screen.show_lesson_code_prompt()
+
+    def _on_lesson_selected(self, lesson: dict):
+        log.info(f"Student selected pre-assigned active lesson {lesson['lesson_id']}")
+        self._lesson_data = lesson
+        joined = db.join_lesson(
+            lesson["lesson_id"],
+            self.loan_data["loan_id"],
+            self.loan_data["device_id"],
+            self.loan_data["student_id"],
+        )
+        if joined:
+            self._lesson_timer = LessonTimer(
+                lesson["end_time"],
+                server_now_str=lesson.get("server_now")
+            )
+            self._start_lesson_realtime(lesson["lesson_id"])
+            db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
+            self._do_unlock(self.loan_data["student_name"])
+        else:
+            self.screen.show_status("שגיאה בהצטרפות לשיעור. נסה שוב.", "#ef4444")
 
     # ── Step 2: אימות קוד שיעור ──────────────────────────────
 

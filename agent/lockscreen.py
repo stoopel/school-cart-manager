@@ -493,10 +493,10 @@ class LockScreen:
         self.root.bind("<Escape>", lambda e: self._on_back())
 
     def _build_numpad(self, parent):
-        pad = tk.Frame(parent, bg=BG_CARD)
-        pad.pack()
+        self.pad_frame = tk.Frame(parent, bg=BG_CARD)
+        self.pad_frame.pack()
         for row in [["7","8","9"],["4","5","6"],["1","2","3"],["⌫","0",""]]:
-            rf = tk.Frame(pad, bg=BG_CARD)
+            rf = tk.Frame(self.pad_frame, bg=BG_CARD)
             rf.pack()
             for ch in row:
                 if ch == "":
@@ -724,3 +724,68 @@ class LockScreen:
         except Exception:
             pass
         self.root.after(3000, self._check_watchdog_loop)
+
+    def show_lesson_selection(self, lessons: list, on_select):
+        """מציג מסך בחירת שיעור מתוך רשימה לתלמיד ששויך למספר שיעורים במקביל"""
+        self._step = 3  # שלב בחירה
+        def _do():
+            # hide numpad, display, and submit button
+            self.lbl_display.master.pack_forget()
+            if hasattr(self, 'pad_frame'):
+                self.pad_frame.pack_forget()
+            self.btn_submit.pack_forget()
+            
+            self.lbl_title.config(text="בחר את השיעור שלך", fg=ACCENT)
+            self.lbl_subtitle.config(text="שויכת למספר שיעורים פעילים במקביל. בחר אחד:")
+            self.lbl_status.config(text="")
+            
+            # create selection container
+            self.select_frame = tk.Frame(self.lbl_title.master, bg=BG_CARD)
+            self.select_frame.pack(fill="x", pady=20)
+            
+            # Add a button for each lesson
+            for lesson in lessons:
+                lbl = f"📚 {lesson.get('subject', 'שיעור')} ({lesson.get('teacher_name', 'מורה')})"
+                btn = tk.Button(
+                    self.select_frame, text=lbl, font=self.font_sub,
+                    bg=BG_INPUT, fg=TEXT_MAIN, activebackground="#2a3550",
+                    activeforeground=TEXT_NUM, bd=1, relief="solid", highlightthickness=0,
+                    padx=15, pady=12, cursor="hand2", anchor="w",
+                    command=lambda l=lesson: [self.clear_selection_screen(), on_select(l)]
+                )
+                btn.pack(fill="x", pady=6)
+                
+            # Add a cancel button to go back to T.Z. input
+            btn_cancel = tk.Button(
+                self.select_frame, text="❌ ביטול וחזרה", font=self.font_small,
+                bg="rgba(239,68,68,0.15)", fg="#fca5a5", activebackground="#3d2121",
+                bd=0, padx=15, pady=8, cursor="hand2",
+                command=self.cancel_lesson_selection
+            )
+            btn_cancel.pack(fill="x", pady=(20, 0))
+            
+        self.root.after(0, _do)
+
+    def clear_selection_screen(self):
+        if hasattr(self, 'select_frame') and self.select_frame:
+            try:
+                self.select_frame.destroy()
+            except Exception:
+                pass
+            self.select_frame = None
+
+    def cancel_lesson_selection(self):
+        self.clear_selection_screen()
+        self._step = 1
+        self.entered_id = ""
+        
+        # restore widgets
+        self.lbl_display.master.pack(fill="x", pady=(0, 24))
+        if hasattr(self, 'pad_frame'):
+            self.pad_frame.pack()
+        self.btn_submit.pack(fill="x", pady=(12, 0))
+        
+        self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
+        self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {self.loan_data.get('student_name', '')} | כיתה {self.loan_data.get('class_name', '')}" if self.loan_data else "")
+        self.lbl_display.config(text="")
+        self.show_status("")

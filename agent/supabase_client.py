@@ -204,6 +204,16 @@ def get_lesson_status(lesson_id: str) -> dict | None:
                              "select": "status,is_locked,end_time"})
     return rows[0] if rows else None
 
+def check_pre_assigned_lessons(national_id: str) -> list:
+    """
+    בודק האם התלמיד משויך לשיעור פעיל אחד או יותר.
+    מחזיר רשימה של שיעורים: [{lesson_id, lesson_code, subject, teacher_name, end_time, server_now, is_locked}]
+    """
+    res = _rpc("get_pre_assigned_active_lesson", {"entered_id": national_id})
+    if res and isinstance(res, list):
+        return res
+    return []
+
 
 # ─── Strikes ──────────────────────────────────────────────────
 

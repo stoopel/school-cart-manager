@@ -173,15 +173,16 @@ class CartAgent:
             return
 
         # 3. בדיקת strikes (עונשי אי-טעינה)
-        strikes = self.loan_data.get("charge_strikes", 0)
-        if strikes >= MAX_STRIKES:
+        enable_tracking = self.loan_data.get("enable_charge_tracking", True)
+        strikes = self.loan_data.get("charge_strikes", 0) if enable_tracking else 0
+        if enable_tracking and strikes >= MAX_STRIKES:
             self.screen.show_status(
                 f"⛔ חשבונך חסום ({strikes} עבירות אי-טעינה). פנה למנהל.", "#ef4444")
             return
 
-        if strikes == 2:
+        if enable_tracking and strikes == 2:
             self.screen.show_status("⚠️ אזהרה אחרונה: לא חיברת מחשב לטעינה פעמיים!", "#f59e0b")
-        elif strikes == 1:
+        elif enable_tracking and strikes == 1:
             self.screen.show_status("⚠️ שים לב: לא חיברת מחשב לטעינה בפעם הקודמת.", "#fbbf24")
 
         # 4. וידוא התאמה מול מזהה ההשאלה הקיים
@@ -388,8 +389,12 @@ class CartAgent:
                                         self.loan_data["loan_id"])
                 log.info("Charge reset for student")
         else:
-            # לא הוטען ❌ – מצא את מי שהחזיר אחרון
-            self._attribute_strike_to_last_returner()
+            # לא הוטען ❌ – מצא את מי שהחזיר אחרון (רק אם מעקב טעינה פעיל בעגלה)
+            enable_tracking = self.loan_data.get("enable_charge_tracking", True) if self.loan_data else True
+            if enable_tracking:
+                self._attribute_strike_to_last_returner()
+            else:
+                log.info("Charge check delta negative, but enable_charge_tracking is disabled. Skipping strike attribution.")
 
     def _attribute_strike_to_last_returner(self):
         """מוצא את התלמיד שהחזיר אחרון ומוסיף לו strike"""

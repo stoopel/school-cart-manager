@@ -68,7 +68,7 @@ def get_device_id_by_asset_tag(asset_tag):
     return rows[0]["id"] if rows else None
 
 def get_active_loan(asset_tag):
-    devs = _get("devices", {"asset_tag": f"eq.{asset_tag}", "select": "id,device_number"})
+    devs = _get("devices", {"asset_tag": f"eq.{asset_tag}", "select": "id,device_number,cart_id"})
     if not devs: return None
     did = devs[0]["id"]
     loans = _get("device_loans", {"device_id": f"eq.{did}", "status": "eq.active",
@@ -80,6 +80,14 @@ def get_active_loan(asset_tag):
                              "select": "id,national_id,name,class_name,grade,charge_strikes"})
     if not stu: return None
     s = stu[0]
+
+    # Fetch per-cart charge tracking setting
+    enable_tracking = True
+    if devs[0].get("cart_id"):
+        cart_opts = _get("carts", {"id": f"eq.{devs[0]['cart_id']}", "select": "enable_charge_tracking"})
+        if cart_opts:
+            enable_tracking = cart_opts[0].get("enable_charge_tracking", True)
+
     return {
         "loan_id":       loan["id"],
         "device_id":     did,
@@ -92,6 +100,7 @@ def get_active_loan(asset_tag):
         "class_name":    s.get("class_name", ""),
         "grade":         s.get("grade", ""),
         "charge_strikes": s.get("charge_strikes", 0),
+        "enable_charge_tracking": enable_tracking,
     }
 
 def log_digital_login(loan_id, device_id):

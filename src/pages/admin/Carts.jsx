@@ -11,7 +11,7 @@ export default function Carts() {
   const [showAddCart, setShowAddCart]   = useState(false)
   const [showEditCart, setShowEditCart] = useState(false)
   const [showAddDevice, setShowAddDevice] = useState(false)
-  const [cartForm, setCartForm]   = useState({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '' })
+  const [cartForm, setCartForm]   = useState({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '', allow_manual_entry: true, enable_charge_tracking: true })
   const [deviceForm, setDeviceForm] = useState({ device_number: '', asset_tag: '' })
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
@@ -133,12 +133,14 @@ export default function Carts() {
       display_name: cartForm.display_name.trim() || null,
       location: cartForm.location.trim(),
       total_devices: Number(cartForm.total_devices) || 0,
-      kiosk_code: code
+      kiosk_code: code,
+      allow_manual_entry: cartForm.allow_manual_entry,
+      enable_charge_tracking: cartForm.enable_charge_tracking
     })
     setSaving(false)
     if (err) { setError(err.message); return }
     setShowAddCart(false)
-    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '' })
+    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '', allow_manual_entry: true, enable_charge_tracking: true })
     loadCarts()
   }
 
@@ -149,13 +151,15 @@ export default function Carts() {
       display_name: cartForm.display_name.trim() || null,
       location: cartForm.location.trim(),
       total_devices: Number(cartForm.total_devices) || 0,
-      kiosk_code: code
+      kiosk_code: code,
+      allow_manual_entry: cartForm.allow_manual_entry,
+      enable_charge_tracking: cartForm.enable_charge_tracking
     }).eq('id', cartForm.id)
     
     setSaving(false)
     if (err) { setError(err.message); return }
     setShowEditCart(false)
-    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '' })
+    setCartForm({ id: '', name: '', display_name: '', location: '', total_devices: '', kiosk_code: '', allow_manual_entry: true, enable_charge_tracking: true })
     loadCarts()
   }
 
@@ -166,7 +170,9 @@ export default function Carts() {
       display_name: cart.display_name || '',
       location: cart.location || '',
       total_devices: cart.total_devices || '',
-      kiosk_code: cart.kiosk_code || ''
+      kiosk_code: cart.kiosk_code || '',
+      allow_manual_entry: cart.allow_manual_entry !== false,
+      enable_charge_tracking: cart.enable_charge_tracking !== false
     })
     setShowEditCart(true)
   }
@@ -503,6 +509,16 @@ export default function Carts() {
                   <button type="button" className="btn btn-ghost" onClick={() => setCartForm(f => ({ ...f, kiosk_code: String(Math.floor(1000 + Math.random() * 9000)) }))}>🎲 חולל</button>
                 </div>
               </div>
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#f1f5f9', fontWeight: 600 }}>
+                  <input type="checkbox" checked={cartForm.allow_manual_entry} onChange={e => setCartForm(f => ({ ...f, allow_manual_entry: e.target.checked }))} style={{ width: 18, height: 18, accentColor: '#f59e0b', cursor: 'pointer' }} />
+                  אפשר הקלדת מספר מחשב ידנית בקיוסק
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#f1f5f9', fontWeight: 600 }}>
+                  <input type="checkbox" checked={cartForm.enable_charge_tracking} onChange={e => setCartForm(f => ({ ...f, enable_charge_tracking: e.target.checked }))} style={{ width: 18, height: 18, accentColor: '#f59e0b', cursor: 'pointer' }} />
+                  הפעל מעקב טעינה וחסימות לתלמידים (Strikes)
+                </label>
+              </div>
               <div className="modal-footer">
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? '⏳...' : '✅ הוסף'}</button>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowAddCart(false)}>ביטול</button>
@@ -546,6 +562,16 @@ export default function Carts() {
                   <button type="button" className="btn btn-ghost" onClick={() => setCartForm(f => ({ ...f, kiosk_code: String(Math.floor(1000 + Math.random() * 9000)) }))}>🎲 חולל</button>
                 </div>
                 <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 4 }}>שינוי הקוד ינתק באופן מיידי את הטאבלט הפיזי של העגלה וידרוש הזנת הקוד החדש.</div>
+              </div>
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#f1f5f9', fontWeight: 600 }}>
+                  <input type="checkbox" checked={cartForm.allow_manual_entry} onChange={e => setCartForm(f => ({ ...f, allow_manual_entry: e.target.checked }))} style={{ width: 18, height: 18, accentColor: '#f59e0b', cursor: 'pointer' }} />
+                  אפשר הקלדת מספר מחשב ידנית בקיוסק
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#f1f5f9', fontWeight: 600 }}>
+                  <input type="checkbox" checked={cartForm.enable_charge_tracking} onChange={e => setCartForm(f => ({ ...f, enable_charge_tracking: e.target.checked }))} style={{ width: 18, height: 18, accentColor: '#f59e0b', cursor: 'pointer' }} />
+                  הפעל מעקב טעינה וחסימות לתלמידים (Strikes)
+                </label>
               </div>
               <div className="modal-footer">
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? '⏳...' : '✅ שמור שינויים'}</button>

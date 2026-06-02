@@ -8,6 +8,7 @@ const NAV_MANAGE = [
   { label: 'היסטוריית השאלות',  icon: '📋', to: '/admin/loans' },
   { label: 'הדפסת תוויות QR',   icon: '🖨️', to: '/admin/labels' },
   { label: 'מנהלים מורשים',     icon: '🛡️', to: '/admin/admins' },
+  { label: 'ייבוא נתונים',       icon: '📥', to: '/admin/import' },
 ]
 
 const NAV_CLASS = [

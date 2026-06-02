@@ -12,6 +12,7 @@ import TeacherApp  from './pages/teacher/TeacherApp'
 import LandingPage from './pages/LandingPage'
 import AdminLogin  from './components/AdminLogin'
 import AllowedAdmins from './pages/admin/AllowedAdmins'
+import ImportCenter from './pages/admin/ImportCenter'
 import './index.css'
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="loans"     element={<Loans />} />
           <Route path="labels"    element={<Labels />} />
           <Route path="admins"    element={<AllowedAdmins />} />
+          <Route path="import"    element={<ImportCenter />} />
         </Route>
 
         {/* תחנת עגלה – Kiosk */}

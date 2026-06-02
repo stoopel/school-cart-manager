@@ -22,8 +22,7 @@ if getattr(sys, 'frozen', False):
 else:
     _DIR = os.path.dirname(os.path.abspath(__file__))
 
-with open(os.path.join(_DIR, "config.json"), encoding="utf-8-sig") as f:
-    CONFIG = json.load(f)
+CONFIG = db.load_obfuscated_config(os.path.join(_DIR, "config.json"))
 
 ASSET_TAG       = CONFIG["asset_tag"]
 ADMIN_CODE      = CONFIG.get("admin_code", "")
@@ -42,7 +41,9 @@ class _LASTINPUTINFO(ctypes.Structure):
 def get_idle_seconds():
     lii = _LASTINPUTINFO(); lii.cbSize = ctypes.sizeof(lii)
     ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
-    return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000.0
+    # ביצוע פעולת AND מול 0xFFFFFFFF לטיפול נכון בגלישת 32-ביט של שעון מערכת Windows (אחת ל-49.7 ימים)
+    elapsed_ticks = (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) & 0xFFFFFFFF
+    return elapsed_ticks / 1000.0
 
 def send_to_sleep():
     ctypes.windll.PowrProf.SetSuspendState(0, 1, 0)
@@ -60,11 +61,18 @@ def get_battery_info():
     return level, charging
 
 def is_connected():
+    s = None
     try:
-        socket.setdefaulttimeout(3)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(3)
+        s.connect(("8.8.8.8", 53))
+        s.close()
         return True
-    except: return False
+    except Exception:
+        if s:
+            try: s.close()
+            except: pass
+        return False
 
 
 # ── Lesson Timer ──────────────────────────────────────────────
@@ -99,8 +107,8 @@ class LessonTimer:
         expected_current_remaining = self.expected_remaining_at_start - elapsed_mono
         system_remaining = self.remaining_seconds()
         
-        # אם הסטייה בין הנותר המצופה (לפי מונוטוני) לנותר המחושב גדולה מ-15 שניות, זו מניפולציה
-        if abs(system_remaining - expected_current_remaining) > 15.0:
+        # אם הסטייה בין הנותר המצופה (לפי מונוטוני) לנותר המחושב גדולה מ-15 שניות, זו מניפולציה (הזזה לאחור)
+        if (system_remaining - expected_current_remaining) > 15.0:
             return True
         return False
 
@@ -135,10 +143,15 @@ class CartAgent:
         self.device_id = db.get_device_id_by_asset_tag(ASSET_TAG)
         self._refresh_loan_state("startup")
 
+        # Start Realtime subscription for loans
+        if self.device_id:
+            self._start_loan_realtime(self.device_id)
+
         threading.Thread(target=self._heartbeat_loop,     daemon=True).start()
         threading.Thread(target=self._wifi_loop,          daemon=True).start()
         threading.Thread(target=self._idle_loop,          daemon=True).start()
         threading.Thread(target=self._lesson_timer_loop,  daemon=True).start()
+        threading.Thread(target=self._watchdog_monitor_loop, daemon=True).start()
 
         self.screen = LockScreen(on_unlock=self._on_unlock, config=CONFIG)
         self.screen.set_verify_callback(self._verify_step1_id)
@@ -151,14 +164,23 @@ class CartAgent:
     def _verify_step1_id(self, entered: str):
         log.info(f"Step1 ID: {entered[:3]}***")
 
+        # Translate Hebrew layout typing back to English QWERTY
+        mapping = {
+            'ש': 'a', 'ד': 's', 'ג': 'd', 'כ': 'f', 'ע': 'g', 'י': 'h', 'ח': 'j', 'ל': 'k', 'ך': 'l', 'ף': ';',
+            'ק': 'w', 'ר': 'e', 'א': 'r', 'ט': 't', 'ו': 'y', 'ן': 'u', 'ם': 'i', 'פ': 'o', ']': 'p',
+            'ז': 'z', 'ס': 'x', 'ב': 'c', 'ה': 'v', 'נ': 'b', 'מ': 'n', 'צ': 'm', '/': 'q'
+        }
+        translated = "".join(mapping.get(c, c) for c in entered)
+
         # 1. קוד אדמין - מעקף חירום פיזי מוחלט (מנהל מערכת)
         is_admin = False
-        if ADMIN_CODE and entered == ADMIN_CODE:
+        if ADMIN_CODE and (entered == ADMIN_CODE or translated == ADMIN_CODE):
             is_admin = True
         elif ADMIN_CODE_HASH:
             import hashlib
-            hashed = hashlib.sha256(entered.encode('utf-8')).hexdigest()
-            if hashed == ADMIN_CODE_HASH:
+            hashed_orig = hashlib.sha256(entered.encode('utf-8')).hexdigest()
+            hashed_trans = hashlib.sha256(translated.encode('utf-8')).hexdigest()
+            if hashed_orig == ADMIN_CODE_HASH or hashed_trans == ADMIN_CODE_HASH:
                 is_admin = True
 
         if is_admin:
@@ -167,133 +189,252 @@ class CartAgent:
             self._do_unlock("מנהל מערכת")
             return
 
-        # 2. אין השאלה פעילה - חסימה גורפת (לכולם חוץ מאדמין)
-        if not self.loan_data:
-            self.screen.show_status("פנה לתחנת העגלה לפני השימוש.", "#f59e0b")
-            return
+        # מעבר לחישוב אסינכרוני כדי למנוע את קפיאת ממשק ה-Tkinter
+        self.screen.set_verifying(True)
+        threading.Thread(target=self._async_verify_id, args=(entered,), daemon=True).start()
 
-        # 3. בדיקת strikes (עונשי אי-טעינה)
-        enable_tracking = self.loan_data.get("enable_charge_tracking", True)
-        strikes = self.loan_data.get("charge_strikes", 0) if enable_tracking else 0
-        if enable_tracking and strikes >= MAX_STRIKES:
-            self.screen.show_status(
-                f"⛔ חשבונך חסום ({strikes} עבירות אי-טעינה). פנה למנהל.", "#ef4444")
-            return
+    def _async_verify_id(self, entered: str):
+        try:
+            log.info(f"Async Step1 ID: {entered[:3]}***")
 
-        if enable_tracking and strikes == 2:
-            self.screen.show_status("⚠️ אזהרה אחרונה: לא חיברת מחשב לטעינה פעמיים!", "#f59e0b")
-        elif enable_tracking and strikes == 1:
-            self.screen.show_status("⚠️ שים לב: לא חיברת מחשב לטעינה בפעם הקודמת.", "#fbbf24")
-
-        # 4. וידוא התאמה מול מזהה ההשאלה הקיים
-        if entered != self.loan_data["national_id"]:
-            name = self.loan_data["student_name"]
-            self.screen.show_status(f"שגיאה: מחשב זה שייך ל-{name}.", "#ef4444")
-            if self.device_id:
-                db.log_event(self.device_id, self.loan_data["loan_id"],
-                             "auth_failed", {"prefix": entered[:3]})
-            return
-
-        # 5. זיהוי האם מדובר במורה או תלמיד
-        teacher = db.is_teacher(entered)
-        if teacher:
-            # מורה - פתיחה מיידית ללא צורך בקוד שיעור
-            log.info(f"Teacher login: {teacher['name']}")
-            self._teacher_bypass = True
-            if self.device_id:
-                db.log_event(self.device_id, self.loan_data["loan_id"],
-                             "teacher_login", {"name": teacher["name"]})
-            self._do_unlock(teacher["name"])
-            return
-
-        # 6. תלמיד - בדיקה האם יש שיעור משויך מראש
-        self._teacher_bypass = False
-        pre_assigned = db.check_pre_assigned_lessons(entered)
-        if pre_assigned:
-            if len(pre_assigned) == 1:
-                # שיעור יחיד - כניסה אוטומטית ישירה
-                lesson = pre_assigned[0]
-                self._lesson_data = lesson
-                joined = db.join_lesson(
-                    lesson["lesson_id"],
-                    self.loan_data["loan_id"],
-                    self.loan_data["device_id"],
-                    self.loan_data["student_id"],
-                )
-                if joined:
-                    log.info(f"Auto-joined pre-assigned active lesson {lesson['lesson_id']}")
-                    self._lesson_timer = LessonTimer(
-                        lesson["end_time"],
-                        server_now_str=lesson.get("server_now")
-                    )
-                    self._start_lesson_realtime(lesson["lesson_id"])
-                    db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
-                    self._do_unlock(self.loan_data["student_name"])
-                    return
-            else:
-                # מספר שיעורים במקביל - הצגת ממשק בחירה
-                log.info(f"Multiple pre-assigned active lessons found: {len(pre_assigned)}")
-                self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected)
+            # 2. אין השאלה פעילה - חסימה גורפת (לכולם חוץ מאדמין)
+            if not self.loan_data:
+                if not is_connected():
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("שגיאה בתקשורת עם השרת. נסה שוב.", "#ef4444")
+                    ])
+                else:
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("פנה לתחנת העגלה לפני השימוש.", "#f59e0b")
+                    ])
                 return
 
-        # 7. לא נמצא שיוך מראש - דרישת קוד שיעור פעיל כרגיל
-        self.screen.show_lesson_code_prompt()
+            # 3. זיהוי האם מדובר במורה (מעקף מורה מאובטח)
+            teacher = db.is_teacher(entered)
+            if teacher:
+                log.info(f"Teacher login bypass: {teacher['name']}")
+                self._teacher_bypass = True
+                if self.device_id:
+                    db.log_event(self.device_id, self.loan_data["loan_id"],
+                                 "teacher_login", {"name": teacher["name"]})
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self._do_unlock(teacher["name"])
+                ])
+                return
+
+            # כעת כשברור שזה אינו מורה, נבדוק את מגבלות התלמיד
+
+            # 4. בדיקת strikes (עונשי אי-טעינה)
+            enable_tracking = self.loan_data.get("enable_charge_tracking", True)
+            strikes = self.loan_data.get("charge_strikes", 0) if enable_tracking else 0
+            if enable_tracking and strikes >= MAX_STRIKES:
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.show_status(f"⛔ חשבונך חסום ({strikes} עבירות אי-טעינה). פנה למנהל.", "#ef4444")
+                ])
+                return
+
+            # 5. וידוא התאמה מול מזהה ההשאלה הקיים של התלמיד
+            if entered != self.loan_data["national_id"]:
+                name = self.loan_data["student_name"]
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.show_status(f"שגיאה: מחשב זה שייך ל-{name}.", "#ef4444")
+                ])
+                if self.device_id:
+                    db.log_event(self.device_id, self.loan_data["loan_id"],
+                                 "auth_failed", {"prefix": entered[:3]})
+                return
+
+            # 6. תלמיד תקין - בדיקה האם יש שיעור משויך מראש
+            self._teacher_bypass = False
+
+            # מניעת לולאת נעילה בעקבות ריבוט / נעילה (Reboot/Lock loop bypass)
+            # אם התלמיד כבר רשום לשיעור פעיל כלשהו במסד הנתונים כחלק מההשאלה שלו, נבצע מעקף פתיחה ישיר
+            current_db_loan = db.get_active_loan(ASSET_TAG)
+            if current_db_loan and current_db_loan.get("lesson_id"):
+                lesson_id = current_db_loan["lesson_id"]
+                active_lesson = db.get_active_lesson_by_id(lesson_id)
+                if active_lesson:
+                    log.info(f"Student already joined to active lesson {lesson_id} (Reboot loop bypass). Unlocking directly.")
+                    self._lesson_data = active_lesson
+                    self._lesson_timer = LessonTimer(
+                        active_lesson["end_time"],
+                        server_now_str=active_lesson.get("server_now")
+                    )
+                    self._start_lesson_realtime(lesson_id)
+                    db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self._do_unlock(self.loan_data["student_name"])
+                    ])
+                    return
+
+            pre_assigned = db.check_pre_assigned_lessons(entered)
+            if pre_assigned:
+                if len(pre_assigned) == 1:
+                    # שיעור יחיד - כניסה אוטומטית ישירה
+                    lesson = pre_assigned[0]
+                    self._lesson_data = lesson
+                    joined = db.join_lesson(
+                        lesson["lesson_id"],
+                        self.loan_data["loan_id"],
+                        self.loan_data["device_id"],
+                        self.loan_data["student_id"],
+                    )
+                    if joined:
+                        log.info(f"Auto-joined pre-assigned active lesson {lesson['lesson_id']}")
+                        self._lesson_timer = LessonTimer(
+                            lesson["end_time"],
+                            server_now_str=lesson.get("server_now")
+                        )
+                        self._start_lesson_realtime(lesson["lesson_id"])
+                        db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
+                        self.screen.root.after(0, lambda: [
+                            self.screen.set_verifying(False),
+                            self._do_unlock(self.loan_data["student_name"])
+                        ])
+                        return
+                    else:
+                        self.screen.root.after(0, lambda: [
+                            self.screen.set_verifying(False),
+                            self.screen.show_status("שגיאה בהצטרפות לשיעור. נסה שוב.", "#ef4444")
+                        ])
+                        return
+                else:
+                    # מספר שיעורים במקביל - הצגת ממשק בחירה
+                    log.info(f"Multiple pre-assigned active lessons found: {len(pre_assigned)}")
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected)
+                    ])
+                    return
+
+            # 7. לא נמצא שיוך מראש - דרישת קוד שיעור פעיל כרגיל
+            warn_msg = None
+            warn_color = None
+            if enable_tracking and strikes == 2:
+                warn_msg = "⚠️ אזהרה אחרונה: לא חיברת מחשב לטעינה פעמיים!"
+                warn_color = "#f59e0b"
+            elif enable_tracking and strikes == 1:
+                warn_msg = "⚠️ שים לב: לא חיברת מחשב לטעינה בפעם הקודמת."
+                warn_color = "#fbbf24"
+
+            self.screen.root.after(0, lambda: [
+                self.screen.set_verifying(False),
+                self.screen.show_lesson_code_prompt(),
+                self.screen.show_status(warn_msg, warn_color) if warn_msg else None
+            ])
+        except Exception as e:
+            log.error(f"Error in _async_verify_id: {e}", exc_info=True)
+            self.screen.root.after(0, lambda: [
+                self.screen.set_verifying(False),
+                self.screen.show_status("שגיאה בתקשורת עם השרת. נסה שוב.", "#ef4444")
+            ])
 
     def _on_lesson_selected(self, lesson: dict):
         log.info(f"Student selected pre-assigned active lesson {lesson['lesson_id']}")
-        self._lesson_data = lesson
-        joined = db.join_lesson(
-            lesson["lesson_id"],
-            self.loan_data["loan_id"],
-            self.loan_data["device_id"],
-            self.loan_data["student_id"],
-        )
-        if joined:
-            self._lesson_timer = LessonTimer(
-                lesson["end_time"],
-                server_now_str=lesson.get("server_now")
+        self.screen.set_verifying(True)
+        threading.Thread(target=self._async_lesson_selected, args=(lesson,), daemon=True).start()
+
+    def _async_lesson_selected(self, lesson: dict):
+        try:
+            self._lesson_data = lesson
+            joined = db.join_lesson(
+                lesson["lesson_id"],
+                self.loan_data["loan_id"],
+                self.loan_data["device_id"],
+                self.loan_data["student_id"],
             )
-            self._start_lesson_realtime(lesson["lesson_id"])
-            db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
-            self._do_unlock(self.loan_data["student_name"])
-        else:
-            self.screen.show_status("שגיאה בהצטרפות לשיעור. נסה שוב.", "#ef4444")
+            if joined:
+                self._lesson_timer = LessonTimer(
+                    lesson["end_time"],
+                    server_now_str=lesson.get("server_now")
+                )
+                self._start_lesson_realtime(lesson["lesson_id"])
+                db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self._do_unlock(self.loan_data["student_name"])
+                ])
+            else:
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.show_status("שגיאה בהצטרפות לשיעור. נסה שוב.", "#ef4444")
+                ])
+        except Exception as e:
+            log.error(f"Error in _async_lesson_selected: {e}", exc_info=True)
+            self.screen.root.after(0, lambda: [
+                self.screen.set_verifying(False),
+                self.screen.show_status("שגיאה בתקשורת עם השרת. נסה שוב.", "#ef4444")
+            ])
 
     # ── Step 2: אימות קוד שיעור ──────────────────────────────
 
     def _verify_step2_lesson(self, code: str):
         log.info(f"Lesson code entered: {code}")
+        self.screen.set_verifying(True)
+        threading.Thread(target=self._async_verify_lesson, args=(code,), daemon=True).start()
 
-        lesson = db.get_active_lesson_by_code(code)
-        if not lesson:
-            self.screen.show_status("קוד שיעור שגוי. נסה שוב.", "#ef4444")
-            return
+    def _async_verify_lesson(self, code: str):
+        try:
+            lesson = db.get_active_lesson_by_code(code)
+            if not lesson:
+                if not is_connected():
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("שגיאה בתקשורת עם השרת. נסה שוב.", "#ef4444")
+                    ])
+                else:
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("קוד שיעור שגוי. נסה שוב.", "#ef4444")
+                    ])
+                return
 
-        if lesson.get("is_locked"):
-            self.screen.show_status("השיעור נעול כעת. המתן למורה.", "#f59e0b")
-            return
+            if lesson.get("is_locked"):
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.show_status("השיעור נעול כעת. המתן למורה.", "#f59e0b")
+                ])
+                return
 
-        # הצטרף לשיעור
-        self._lesson_data = lesson
-        joined = db.join_lesson(
-            lesson["lesson_id"],
-            self.loan_data["loan_id"],
-            self.loan_data["device_id"],
-            self.loan_data["student_id"],
-        )
-        if joined:
-            log.info(f"Joined lesson {lesson['lesson_id']}")
-            # הגדר טיימר עם ה-end_time וזמן השרת האמיתי
-            self._lesson_timer = LessonTimer(
-                lesson["end_time"],
-                server_now_str=lesson.get("server_now")
+            # הצטרף לשיעור
+            self._lesson_data = lesson
+            joined = db.join_lesson(
+                lesson["lesson_id"],
+                self.loan_data["loan_id"],
+                self.loan_data["device_id"],
+                self.loan_data["student_id"],
             )
-            # Realtime לשיעור
-            self._start_lesson_realtime(lesson["lesson_id"])
-            db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
-            self._do_unlock(self.loan_data["student_name"])
-        else:
-            self.screen.show_status("שגיאה בהצטרפות לשיעור. נסה שוב.", "#ef4444")
+            if joined:
+                log.info(f"Joined lesson {lesson['lesson_id']}")
+                # הגדר טיימר עם ה-end_time וזמן השרת האמיתי
+                self._lesson_timer = LessonTimer(
+                    lesson["end_time"],
+                    server_now_str=lesson.get("server_now")
+                )
+                # Realtime לשיעור
+                self._start_lesson_realtime(lesson["lesson_id"])
+                db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self._do_unlock(self.loan_data["student_name"])
+                ])
+            else:
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.show_status("שגיאה בהצטרפות לשיעור. נסה שוב.", "#ef4444")
+                ])
+        except Exception as e:
+            log.error(f"Error in _async_verify_lesson: {e}", exc_info=True)
+            self.screen.root.after(0, lambda: [
+                self.screen.set_verifying(False),
+                self.screen.show_status("שגיאה בתקשורת עם השרת. נסה שוב.", "#ef4444")
+            ])
 
     # ── Unlock ────────────────────────────────────────────────
 
@@ -303,6 +444,23 @@ class CartAgent:
 
     def _on_unlock(self):
         log.info("Device unlocked.")
+
+    # ── Realtime: Loan ────────────────────────────────────────
+
+    def _start_loan_realtime(self, device_id: str):
+        if self._rt_loan: self._rt_loan.stop()
+        self._rt_loan = db.RealtimeSubscription(
+            table="device_loans",
+            record_filter=f"device_id=eq.{device_id}",
+            on_change=self._on_loan_changed,
+            channel_name=f"loan-{device_id}",
+            event_type="*",
+        )
+        self._rt_loan.start()
+
+    def _on_loan_changed(self, record: dict):
+        log.info(f"Realtime loan update received: {record}")
+        self._refresh_loan_state("realtime_loan_update")
 
     # ── Realtime ──────────────────────────────────────────────
 
@@ -350,6 +508,7 @@ class CartAgent:
 
     def _lesson_timer_loop(self):
         warned = False
+        polling_counter = 0
         while self._running:
             time.sleep(1)
             if not self._lesson_timer or not self._unlocked:
@@ -360,9 +519,22 @@ class CartAgent:
             if self._lesson_timer.check_time_manipulation():
                 log.warning("System clock manipulation detected! Force locking device.")
                 self._unlocked = False
+                if self.device_id and self.loan_data:
+                    db.log_event(self.device_id, self.loan_data["loan_id"], "clock_tampering_detected", {
+                        "expected_remaining": self._lesson_timer.expected_remaining_at_start - (time.monotonic() - self._lesson_timer.start_mono),
+                        "system_remaining": self._lesson_timer.remaining_seconds()
+                    })
                 if self.screen:
                     self.screen.relock("⚠️ אזהרת אבטחה: זוהה שינוי בשעון המערכת. המחשב ננעל.")
                 continue
+
+            # Smart Fallback Polling: אם ה-WebSocket מנותק או חסום, נבצע פולינג כל 25 שניות
+            polling_counter += 1
+            if polling_counter >= 25:
+                polling_counter = 0
+                if self._lesson_data and (not self._rt_lesson or not self._rt_lesson.is_connected):
+                    log.info("WebSocket is disconnected/inactive. Running Smart Fallback Polling...")
+                    threading.Thread(target=self._async_poll_lesson_status, daemon=True).start()
 
             remaining = self._lesson_timer.remaining_seconds()
 
@@ -383,6 +555,31 @@ class CartAgent:
                 log.info("Lesson timer expired – locking")
                 self._lock_lesson_ended()
                 warned = False
+
+    def _async_poll_lesson_status(self):
+        try:
+            if not self._lesson_data:
+                return
+            lesson_id = self._lesson_data["lesson_id"]
+            status_data = db.get_lesson_status(lesson_id)
+            if status_data:
+                status = status_data.get("status", "active")
+                is_locked = status_data.get("is_locked", False)
+                
+                # אם השיעור הסתיים או בוטל
+                if status in ("ended", "cancelled"):
+                    log.info("Smart Fallback Polling: Lesson ended/cancelled")
+                    self.screen.root.after(0, self._lock_lesson_ended)
+                # אם השיעור ננעל והמסך כרגע פתוח
+                elif is_locked and self._unlocked:
+                    log.info("Smart Fallback Polling: Teacher locked screens")
+                    self.screen.root.after(0, self._lock_teacher_pause)
+                # אם השיעור שוחרר והמסך כרגע נעול (ולא נעשה מעקף אדמין)
+                elif not is_locked and not self._unlocked and not self._teacher_bypass:
+                    log.info("Smart Fallback Polling: Teacher unlocked screens")
+                    self.screen.root.after(0, lambda: self.screen.relock("המורה שחרר את המסכים. המתן..."))
+        except Exception as e:
+            log.error(f"Error in _async_poll_lesson_status: {e}")
 
     # ── Loan refresh ──────────────────────────────────────────
 
@@ -407,10 +604,23 @@ class CartAgent:
     def _check_charging_after_wake(self):
         """משווה סוללה לפני/אחרי שינה ומחליט אם לרשום strike"""
         if not self.device_id: return
+        if not self.loan_data:
+            log.info("Device is not currently borrowed. Skipping charge check.")
+            return
 
-        saved   = db.get_last_battery(self.device_id)
         current, charging = get_battery_info()
-        if saved is None or current is None: return
+        if current is None: return
+
+        # אם הסוללה מלאה/טעונה (>= 90%) – נחשב כטעון בהצלחה ללא תנאי, נאפס סטרייקים ונצא
+        if current >= 90:
+            log.info(f"Battery is functionally full ({current}% >= 90%). Resetting strikes for student.")
+            db.reset_charge_strikes(self.loan_data["student_id"],
+                                    self.loan_data["device_id"],
+                                    self.loan_data["loan_id"])
+            return
+
+        saved = db.get_last_battery(self.device_id)
+        if saved is None: return
 
         saved_level   = saved.get("last_battery_level")
         recorded_str  = saved.get("last_battery_recorded")
@@ -426,20 +636,24 @@ class CartAgent:
             log.info(f"Sleep too short ({sleep_hours:.1f}h) – skip charge check")
             return
 
+        # ביטול בדיקה אם המחשב היה כבוי מעל 24 שעות (סוללה התרוקנה מעצמה בסופ"ש/חג)
+        if sleep_hours > 24.0:
+            log.info(f"Device asleep for weekend/holiday ({sleep_hours:.1f}h > 24h). Skipping self-discharge false-positive check.")
+            return
+
         delta = current - saved_level
         log.info(f"Battery: before={saved_level}% after={current}% delta={delta:+d}% sleep={sleep_hours:.1f}h")
 
         # מי החזיר אחרון את המחשב?
         if delta >= 10:
             # הוטען ✅ – אפס strikes לתלמיד ששב
-            if self.loan_data:
-                db.reset_charge_strikes(self.loan_data["student_id"],
-                                        self.loan_data["device_id"],
-                                        self.loan_data["loan_id"])
-                log.info("Charge reset for student")
+            db.reset_charge_strikes(self.loan_data["student_id"],
+                                    self.loan_data["device_id"],
+                                    self.loan_data["loan_id"])
+            log.info("Charge reset for student")
         else:
             # לא הוטען ❌ – מצא את מי שהחזיר אחרון (רק אם מעקב טעינה פעיל בעגלה)
-            enable_tracking = self.loan_data.get("enable_charge_tracking", True) if self.loan_data else True
+            enable_tracking = self.loan_data.get("enable_charge_tracking", True)
             if enable_tracking:
                 self._attribute_strike_to_last_returner()
             else:
@@ -507,6 +721,9 @@ class CartAgent:
                 try:
                     level, charging = get_battery_info()
                     db.heartbeat(self.device_id, battery_level=level, is_charging=charging)
+                    
+                    # Failsafe polling: check if the active loan has been returned or changed
+                    self._refresh_loan_state("heartbeat_polling")
                 except Exception as e:
                     log.error(f"Heartbeat: {e}")
             time.sleep(HB_INTERVAL)
@@ -526,6 +743,24 @@ class CartAgent:
             except Exception as e:
                 log.error(f"Wi-Fi: {e}")
             time.sleep(3)
+
+    # ── Watchdog Monitor ──────────────────────────────────────
+
+    def _watchdog_monitor_loop(self):
+        import subprocess, os
+        watchdog_path = r"C:\Program Files\CartAgent\cart_watchdog.exe"
+        lock_file = r"C:\Program Files\CartAgent\uninstalling.lock"
+        while self._running:
+            time.sleep(5)
+            if os.path.exists(lock_file):
+                continue
+            try:
+                r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cart_watchdog.exe"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                if "cart_watchdog.exe" not in r.stdout:
+                    if os.path.exists(watchdog_path):
+                        subprocess.Popen([watchdog_path], creationflags=subprocess.CREATE_NO_WINDOW)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

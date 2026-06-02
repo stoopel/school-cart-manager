@@ -262,12 +262,12 @@ def set_task_manager_enabled(enabled: bool):
 
 def start_explorer():
     try:
-        res = subprocess.run(["tasklist", "/fi", "IMAGENAME eq explorer.exe"], capture_output=True, text=True)
+        res = subprocess.run(["tasklist", "/fi", "IMAGENAME eq explorer.exe"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         if "explorer.exe" not in res.stdout:
-            subprocess.Popen("explorer.exe", shell=True)
+            subprocess.Popen("explorer.exe", shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception:
         try:
-            subprocess.Popen("explorer.exe", shell=True)
+            subprocess.Popen("explorer.exe", shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
         except Exception:
             pass
 
@@ -642,6 +642,17 @@ class LockScreen:
             self.lbl_subtitle.config(text="פנה לתחנת העגלה כדי לרשום את ההשאלה תחילה.")
             self.btn_submit.config(state="disabled")
 
+    def set_verifying(self, verifying: bool):
+        """השבתת כפתור והצגת סטטוס במהלך בדיקה בשרת למניעת קריסות ולחיצות כפולות"""
+        def _do():
+            if verifying:
+                self.btn_submit.config(state="disabled")
+                self.show_status("בודק נתונים, אנא המתן...", TEXT_DIM)
+            else:
+                self.btn_submit.config(state="normal")
+                self.show_status("")
+        self.root.after(0, _do)
+
     def show_status(self, msg: str, color: str = TEXT_DIM):
         self.root.after(0, lambda: self.lbl_status.config(text=msg, fg=color))
 
@@ -744,11 +755,11 @@ class LockScreen:
         if os.path.exists(lock_file):
             return
         try:
-            r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cart_watchdog.exe"], capture_output=True, text=True)
+            r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cart_watchdog.exe"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             if "cart_watchdog.exe" not in r.stdout:
                 watchdog_path = r"C:\Program Files\CartAgent\cart_watchdog.exe"
                 if os.path.exists(watchdog_path):
-                    subprocess.Popen([watchdog_path])
+                    subprocess.Popen([watchdog_path], creationflags=subprocess.CREATE_NO_WINDOW)
         except Exception:
             pass
         self.root.after(3000, self._check_watchdog_loop)

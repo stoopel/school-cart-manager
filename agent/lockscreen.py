@@ -353,6 +353,7 @@ class LockScreen:
         self._verify_lesson  = lambda x: None
         self._wifi_panel_active = False
         self._wifi_timer_id = None
+        self._verifying = False
 
         self.root = tk.Tk()
         self._setup_window()
@@ -534,6 +535,8 @@ class LockScreen:
     # ── Numpad logic ──────────────────────────────────────────
 
     def _on_digit(self, ch):
+        if getattr(self, "_verifying", False):
+            return
         max_len = 4 if self._step == 2 else 9
         if len(self.entered_id) < max_len:
             self.entered_id += ch
@@ -541,15 +544,21 @@ class LockScreen:
             self.lbl_display.config(text=display)
 
     def _on_backspace(self):
+        if getattr(self, "_verifying", False):
+            return
         self.entered_id = self.entered_id[:-1]
         display = self.entered_id if self._step == 2 else "●" * len(self.entered_id)
         self.lbl_display.config(text=display)
 
     def _on_key(self, event):
+        if getattr(self, "_verifying", False):
+            return
         if event.char.isalnum():
             self._on_digit(event.char)
 
     def _on_submit(self):
+        if getattr(self, "_verifying", False):
+            return
         if not self.entered_id:
             return
         val = self.entered_id
@@ -562,6 +571,8 @@ class LockScreen:
 
     def _on_back(self):
         """ESC בשלב 2 – חזרה לשלב 1"""
+        if getattr(self, "_verifying", False):
+            return
         if self._step == 2:
             self._step = 1
             self.entered_id = ""
@@ -642,15 +653,14 @@ class LockScreen:
             self.lbl_subtitle.config(text="פנה לתחנת העגלה כדי לרשום את ההשאלה תחילה.")
             self.btn_submit.config(state="disabled")
 
-    def set_verifying(self, verifying: bool):
-        """השבתת כפתור והצגת סטטוס במהלך בדיקה בשרת למניעת קריסות ולחיצות כפולות"""
+    def set_verifying(self, state: bool):
+        self._verifying = state
         def _do():
-            if verifying:
-                self.btn_submit.config(state="disabled")
-                self.show_status("בודק נתונים, אנא המתן...", TEXT_DIM)
+            if state:
+                self.btn_submit.config(state='disabled')
+                self.show_status('בודק נתונים...', '#60a5fa')
             else:
-                self.btn_submit.config(state="normal")
-                self.show_status("")
+                self.btn_submit.config(state='normal')
         self.root.after(0, _do)
 
     def show_status(self, msg: str, color: str = TEXT_DIM):

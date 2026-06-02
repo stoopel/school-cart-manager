@@ -43,7 +43,7 @@ HEADERS = {
 def _get(path, params=None):
     try:
         r = requests.get(f"{SUPABASE_URL}/rest/v1/{path}",
-                         headers=HEADERS, params=params, timeout=10)
+                         headers=HEADERS, params=params, timeout=10, verify=False)
         r.raise_for_status(); return r.json()
     except Exception as e:
         log.error(f"GET {path}: {e}"); return None
@@ -51,24 +51,33 @@ def _get(path, params=None):
 def _post(path, data):
     try:
         r = requests.post(f"{SUPABASE_URL}/rest/v1/{path}",
-                          headers=HEADERS, json=data, timeout=10)
-        r.raise_for_status(); return r.json()
+                          headers=HEADERS, json=data, timeout=10, verify=False)
+        r.raise_for_status()
+        if r.status_code == 204 or not r.text.strip():
+            return True
+        return r.json()
     except Exception as e:
         log.error(f"POST {path}: {e}"); return None
 
 def _patch(path, data, params=None):
     try:
         r = requests.patch(f"{SUPABASE_URL}/rest/v1/{path}",
-                           headers=HEADERS, json=data, params=params, timeout=10)
-        r.raise_for_status(); return r.json()
+                           headers=HEADERS, json=data, params=params, timeout=10, verify=False)
+        r.raise_for_status()
+        if r.status_code == 204 or not r.text.strip():
+            return True
+        return r.json()
     except Exception as e:
         log.error(f"PATCH {path}: {e}"); return None
 
 def _rpc(fn, params):
     try:
         r = requests.post(f"{SUPABASE_URL}/rest/v1/rpc/{fn}",
-                          headers=HEADERS, json=params, timeout=10)
-        r.raise_for_status(); return r.json()
+                          headers=HEADERS, json=params, timeout=10, verify=False)
+        r.raise_for_status()
+        if r.status_code == 204 or not r.text.strip():
+            return True
+        return r.json()
     except Exception as e:
         log.error(f"RPC {fn}: {e}"); return None
 
@@ -174,6 +183,26 @@ def get_active_lesson_by_code(lesson_code: str) -> dict | None:
     lesson = rows[0]
 
     # שלוף server NOW() לחישוב offset מדויק באמצעות RPC
+    server_now = _rpc("get_server_time", {})
+    if not server_now:
+        server_now = datetime.utcnow().isoformat() + "Z"
+
+    return {
+        "lesson_id":       lesson["id"],
+        "end_time":        lesson["end_time"],
+        "is_locked":       lesson["is_locked"],
+        "teacher_name":    lesson.get("teacher_name", ""),
+        "subject":         lesson.get("subject", ""),
+        "minutes_remaining": lesson.get("minutes_remaining", 0),
+        "server_now":      server_now,
+    }
+
+def get_active_lesson_by_id(lesson_id: str) -> dict | None:
+    """מחזיר פרטי שיעור פעיל לפי מזהה UUID לצורך מעקף ריבוט"""
+    rows = _get("active_lessons", {"id": f"eq.{lesson_id}", "select": "*"})
+    if not rows: return None
+    lesson = rows[0]
+
     server_now = _rpc("get_server_time", {})
     if not server_now:
         server_now = datetime.utcnow().isoformat() + "Z"
@@ -322,7 +351,7 @@ class RealtimeSubscription:
             on_error=lambda ws, e: log.error(f"WS err: {e}"),
             on_close=lambda ws, c, m: log.info(f"WS closed: {c}"),
         )
-        self._ws.run_forever()
+        self._ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
 
     def _hb_loop(self, ws):
         while self._running:

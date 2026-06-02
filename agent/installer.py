@@ -332,8 +332,8 @@ class InstallerGUI:
             ]
             
             # Kill running agent processes to avoid file-locks during overwriting
-            subprocess.run(["taskkill", "/F", "/IM", "cart_watchdog.exe"], capture_output=True)
-            subprocess.run(["taskkill", "/F", "/IM", "cart_agent.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "cart_watchdog.exe"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run(["taskkill", "/F", "/IM", "cart_agent.exe"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             time.sleep(0.5)
 
             for src_name, dest_name in files_to_copy:
@@ -363,7 +363,7 @@ class InstallerGUI:
             # Start Watchdog immediately
             watchdog_exe = os.path.join(local_dir, "cart_watchdog.exe")
             if os.path.exists(watchdog_exe):
-                subprocess.Popen([watchdog_exe], cwd=local_dir)
+                subprocess.Popen([watchdog_exe], cwd=local_dir, creationflags=subprocess.CREATE_NO_WINDOW)
                 self.log("[OK] Launched CartAgent background security watchdog.")
 
             # 8. Finished installation
@@ -381,8 +381,8 @@ class InstallerGUI:
         self.log("[*] Rollback: Reverting all system changes due to failure...")
         try:
             # 1. Kill any launched processes
-            subprocess.run(["taskkill", "/F", "/IM", "cart_watchdog.exe"], capture_output=True)
-            subprocess.run(["taskkill", "/F", "/IM", "cart_agent.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "cart_watchdog.exe"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run(["taskkill", "/F", "/IM", "cart_agent.exe"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         except Exception:
             pass
 
@@ -390,7 +390,7 @@ class InstallerGUI:
         self.log("[*] Rollback: Restoring default Windows Shell...")
         try:
             # Remove from active user SID under HKEY_USERS
-            res = subprocess.run(["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"], capture_output=True, text=True)
+            res = subprocess.run(["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             logged_user = res.stdout.strip()
             if logged_user and "\\" in logged_user:
                 logged_user = logged_user.split("\\")[-1]
@@ -539,7 +539,7 @@ class InstallerGUI:
         if os.path.exists(inst_path):
             try:
                 self.log("[*] Executing install-interception.exe /install...")
-                subprocess.run([inst_path, "/install"], cwd=local_dir, capture_output=True, check=True)
+                subprocess.run([inst_path, "/install"], cwd=local_dir, capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 self.log("[OK] Protection driver successfully deployed to OS.")
                 return True
             except Exception as e:
@@ -562,7 +562,7 @@ class InstallerGUI:
 
         # 2. Get active logged-in user SID dynamically
         try:
-            res = subprocess.run(["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"], capture_output=True, text=True)
+            res = subprocess.run(["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             logged_user = res.stdout.strip()
             if logged_user and "\\" in logged_user:
                 logged_user = logged_user.split("\\")[-1]
@@ -618,7 +618,7 @@ class InstallerGUI:
                 "התוכנה הותקנה בהצלחה!\n\nלצורך הפעלת דרייבר ההגנה החדש ברמת הקרנל,\nחובה לבצע הפעלה מחדש (Reboot) למחשב.\n\nהאם ברצונך לבצע הפעלה מחדש של המחשב כעת?"
             )
             if ans:
-                subprocess.run(["shutdown", "/r", "/t", "0"])
+                subprocess.run(["shutdown", "/r", "/t", "0"], creationflags=subprocess.CREATE_NO_WINDOW)
         else:
             messagebox.showinfo(
                 "התקנה הושלמה בהצלחה!",

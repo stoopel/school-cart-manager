@@ -170,8 +170,8 @@ class UninstallerGUI:
 
         # 3. Kill processes forcefully just in case
         try:
-            subprocess.run(["taskkill", "/F", "/IM", "cart_watchdog.exe"], capture_output=True)
-            subprocess.run(["taskkill", "/F", "/IM", "cart_agent.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "cart_watchdog.exe"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run(["taskkill", "/F", "/IM", "cart_agent.exe"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             self.log("[OK] Terminated processes.")
         except Exception:
             pass
@@ -206,7 +206,7 @@ class UninstallerGUI:
         # 2. Resolve SID and clean user registry hive
         try:
             # Get physical logged-in user
-            res = subprocess.run(["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"], capture_output=True, text=True)
+            res = subprocess.run(["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             logged_user = res.stdout.strip()
             if logged_user and "\\" in logged_user:
                 logged_user = logged_user.split("\\")[-1]
@@ -254,7 +254,7 @@ class UninstallerGUI:
         if os.path.exists(inst_path):
             try:
                 # Run driver uninstaller
-                subprocess.run([inst_path, "/uninstall"], cwd=r"C:\Program Files\CartAgent", capture_output=True)
+                subprocess.run([inst_path, "/uninstall"], cwd=r"C:\Program Files\CartAgent", capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 self.log("[OK] Executed Interception driver uninstaller.")
                 self.log("[IMPORTANT] System reboot is required to completely unload driver.")
             except Exception as e:
@@ -286,7 +286,7 @@ del "%~f0"
                 f.write(batch_content)
             
             # Start the batch file in a new window/process
-            subprocess.Popen([batch_path], shell=True)
+            subprocess.Popen([batch_path], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
             self.log("[OK] Triggered final folder deletion.")
         except Exception as e:
             self.log(f"[WARNING] Failed to write cleanup batch file: {e}")

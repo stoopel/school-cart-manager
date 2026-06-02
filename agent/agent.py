@@ -481,12 +481,21 @@ class CartAgent:
 
         if status in ("ended", "cancelled"):
             self._lock_lesson_ended()
-        elif is_locked and self._unlocked:
-            self._lock_teacher_pause()
+        elif is_locked:
+            if self._unlocked:
+                self._lock_teacher_pause()
+            else:
+                if self.screen:
+                    self.screen.show_teacher_locked("המורה הפסיק את השיעור זמנית. הקשב למורה. ⏸️")
         elif not is_locked and not self._unlocked and not self._teacher_bypass:
-            # מורה שחרר – אפשר להתחבר מחדש ללא קוד שיעור
-            if self.screen:
-                self.screen.relock("המורה שחרר את המסכים. המתן...")
+            # מורה שחרר – שחרר אוטומטית אם יש שיעור משויך, אחרת החזר למסך התחברות
+            if self._lesson_data:
+                log.info("Realtime: Teacher unlocked -> auto-unlocking")
+                self.screen.root.after(0, lambda: self._do_unlock(self.loan_data["student_name"]))
+            else:
+                log.info("Realtime: Teacher unlocked -> restoring login")
+                if self.screen:
+                    self.screen.restore_from_teacher_lock()
 
     def _lock_lesson_ended(self):
         log.info("Lesson ended → locking")
@@ -502,7 +511,8 @@ class CartAgent:
         log.info("Teacher locked screens")
         self._unlocked = False
         if self.screen:
-            self.screen.relock("המורה הפסיק את השיעור זמנית. המתן.")
+            self.screen.show_teacher_locked("המורה הפסיק את השיעור זמנית. הקשב למורה. ⏸️")
+            self.screen.relock("השיעור בהשהיה")
 
     # ── Lesson Timer Loop ─────────────────────────────────────
 
@@ -576,8 +586,8 @@ class CartAgent:
                     self.screen.root.after(0, self._lock_teacher_pause)
                 # אם השיעור שוחרר והמסך כרגע נעול (ולא נעשה מעקף אדמין)
                 elif not is_locked and not self._unlocked and not self._teacher_bypass:
-                    log.info("Smart Fallback Polling: Teacher unlocked screens")
-                    self.screen.root.after(0, lambda: self.screen.relock("המורה שחרר את המסכים. המתן..."))
+                    log.info("Smart Fallback Polling: Teacher unlocked screens -> auto-unlocking")
+                    self.screen.root.after(0, lambda: self._do_unlock(self.loan_data["student_name"]))
         except Exception as e:
             log.error(f"Error in _async_poll_lesson_status: {e}")
 

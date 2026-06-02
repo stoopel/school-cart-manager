@@ -405,7 +405,7 @@ class LockScreen:
 
         tk.Frame(left, bg=BG, height=120).pack()
 
-        tk.Label(left, text="🏫 " + self.config.get("school_name", "בית הספר"),
+        tk.Label(left, text="🏫 " + self.config.get("school_name", "ישיבת אמית כפר גנים"),
                  font=self.font_title, bg=BG, fg=TEXT_MAIN).pack(anchor="w")
 
         tk.Label(left, text=f"מחשב {self.config.get('asset_tag','')}  |  {self.config.get('cart_name','')}",
@@ -457,20 +457,20 @@ class LockScreen:
         right.pack(side=tk.RIGHT, fill=tk.Y)
 
         inner = tk.Frame(right, bg=BG_CARD)
-        inner.pack(expand=True, padx=60, pady=60)
+        inner.pack(expand=True, padx=40, pady=15)
 
         self.lbl_title = tk.Label(inner, text="הקש את תעודת הזהות שלך",
                                    font=self.font_label, bg=BG_CARD, fg=TEXT_MAIN,
                                    wraplength=380, justify="center")
-        self.lbl_title.pack(pady=(0, 8))
+        self.lbl_title.pack(pady=(0, 4))
 
         self.lbl_subtitle = tk.Label(inner, text="", font=self.font_sub,
                                       bg=BG_CARD, fg=TEXT_DIM,
                                       wraplength=380, justify="center")
-        self.lbl_subtitle.pack(pady=(0, 24))
+        self.lbl_subtitle.pack(pady=(0, 12))
 
-        disp_frame = tk.Frame(inner, bg=BG_INPUT, padx=20, pady=18)
-        disp_frame.pack(fill="x", pady=(0, 24))
+        disp_frame = tk.Frame(inner, bg=BG_INPUT, padx=15, pady=8)
+        disp_frame.pack(fill="x", pady=(0, 12))
 
         self.lbl_display = tk.Label(disp_frame, text="", font=self.font_display,
                                      bg=BG_INPUT, fg=TEXT_NUM, anchor="center")
@@ -481,14 +481,14 @@ class LockScreen:
         self.btn_submit = tk.Button(
             inner, text="✔  אישור", font=self.font_btn,
             bg=ACCENT, fg="white", activebackground=ACCENT_DARK,
-            bd=0, padx=20, pady=14, cursor="hand2", command=self._on_submit,
+            bd=0, padx=20, pady=8, cursor="hand2", command=self._on_submit,
         )
-        self.btn_submit.pack(fill="x", pady=(12, 0))
+        self.btn_submit.pack(fill="x", pady=(10, 0))
 
         self.lbl_status = tk.Label(inner, text="", font=self.font_sub,
                                     bg=BG_CARD, fg=TEXT_DIM,
                                     wraplength=380, justify="center")
-        self.lbl_status.pack(pady=(16, 0))
+        self.lbl_status.pack(pady=(8, 0))
 
         self.root.bind("<Key>", self._on_key)
         self.root.bind("<Return>", lambda e: self._on_submit())
@@ -503,20 +503,20 @@ class LockScreen:
             rf.pack()
             for ch in row:
                 if ch == "":
-                    tk.Frame(rf, bg=BG_CARD, width=90, height=70).pack(
-                        side=tk.LEFT, padx=5, pady=5)
+                    tk.Frame(rf, bg=BG_CARD, width=72, height=52).pack(
+                        side=tk.LEFT, padx=5, pady=3)
                 elif ch == "⌫":
                     tk.Button(rf, text=ch, font=self.font_btn,
                               bg=BG_INPUT, fg=WARNING, bd=0, width=3, height=1,
                               cursor="hand2", command=self._on_backspace,
                               activebackground="#2a3550", activeforeground=WARNING,
-                    ).pack(side=tk.LEFT, padx=5, pady=5, ipadx=12, ipady=12)
+                    ).pack(side=tk.LEFT, padx=5, pady=3, ipadx=8, ipady=6)
                 else:
                     tk.Button(rf, text=ch, font=self.font_btn,
                               bg=BG_INPUT, fg=TEXT_MAIN, bd=0, width=3, height=1,
                               cursor="hand2", command=lambda c=ch: self._on_digit(c),
                               activebackground="#2a3550", activeforeground=TEXT_NUM,
-                    ).pack(side=tk.LEFT, padx=5, pady=5, ipadx=12, ipady=12)
+                    ).pack(side=tk.LEFT, padx=5, pady=3, ipadx=8, ipady=6)
 
     # ── Clock ─────────────────────────────────────────────────
 
@@ -606,13 +606,13 @@ class LockScreen:
         self.root.after(0, _do)
 
     def _open_wifi_panel(self):
-        """פותח את תפריט בחירת הרשתות של Windows"""
+        """פותח את תפריט בחירת הרשתות של Windows באמצעות קריאת Win32 טהורה"""
         self._wifi_panel_active = True
         self.root.attributes("-topmost", False)
         try:
-            os.system("start ms-availablenetworks:")
-        except Exception:
-            subprocess.Popen(["explorer.exe", "ms-availablenetworks:"])
+            subprocess.Popen(["rundll32.exe", "van.dll,RunVAN"])
+        except Exception as e:
+            self.show_status("שגיאה בפתיחת תפריט הרשתות", ERROR)
             
         # ביטול טיימר קודם אם קיים
         if getattr(self, '_wifi_timer_id', None):
@@ -829,12 +829,46 @@ class LockScreen:
         self.entered_id = ""
         
         # restore widgets
-        self.lbl_display.master.pack(fill="x", pady=(0, 24))
+        self.lbl_display.master.pack(fill="x", pady=(0, 12))
         if hasattr(self, 'pad_frame'):
             self.pad_frame.pack()
-        self.btn_submit.pack(fill="x", pady=(12, 0))
+        self.btn_submit.pack(fill="x", pady=(10, 0))
         
         self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
         self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {self.loan_data.get('student_name', '')} | כיתה {self.loan_data.get('class_name', '')}" if self.loan_data else "")
         self.lbl_display.config(text="")
         self.show_status("")
+
+    def show_teacher_locked(self, message: str = "השיעור מושהה כעת. הקשב למורה. ⏸️"):
+        """מציג מסך נעילת מורה ללא אפשרות הקשה או כפתורים"""
+        self._step = 4  # שלב נעילת מורה
+        def _do():
+            # hide numpad, display, and submit button
+            self.lbl_display.master.pack_forget()
+            if hasattr(self, 'pad_frame'):
+                self.pad_frame.pack_forget()
+            self.btn_submit.pack_forget()
+            self.clear_selection_screen()
+
+            self.lbl_title.config(text="🔒 המסכים נעולים", fg=WARNING)
+            self.lbl_subtitle.config(text=message)
+            self.lbl_status.config(text="")
+        self.root.after(0, _do)
+
+    def restore_from_teacher_lock(self):
+        """מחזיר את המסך למצב הקשת תעודת זהות רגיל"""
+        self._step = 1
+        self.entered_id = ""
+        def _do():
+            # restore widgets
+            self.lbl_display.master.pack(fill="x", pady=(0, 12))
+            if hasattr(self, 'pad_frame'):
+                self.pad_frame.pack()
+            self.btn_submit.pack(fill="x", pady=(10, 0))
+
+            self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
+            self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {self.loan_data.get('student_name', '')} | כיתה {self.loan_data.get('class_name', '')}" if self.loan_data else "")
+            self.lbl_display.config(text="")
+            self.lbl_status.config(text="")
+        self.root.after(0, _do)
+

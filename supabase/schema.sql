@@ -110,15 +110,20 @@ CREATE OR REPLACE VIEW cart_status AS
 SELECT
   c.id,
   c.name,
+  c.display_name,
   c.location,
   c.total_devices,
-  COUNT(d.id) AS registered_devices,
+  COUNT(d.id) FILTER (WHERE d.deleted_at IS NULL) AS registered_devices,
   COUNT(dl.id) FILTER (WHERE dl.status = 'active' AND dl.checkin_at IS NULL) AS active_loans,
-  COUNT(d.id) - COUNT(dl.id) FILTER (WHERE dl.status = 'active' AND dl.checkin_at IS NULL) AS available_devices
+  (c.total_devices - COUNT(dl.id) FILTER (WHERE dl.status = 'active' AND dl.checkin_at IS NULL)) AS available_devices,
+  c.deleted_at,
+  c.allow_manual_entry,
+  c.enable_charge_tracking
 FROM carts c
-LEFT JOIN devices d ON d.cart_id = c.id
+LEFT JOIN devices d ON c.id = d.cart_id AND d.deleted_at IS NULL
 LEFT JOIN device_loans dl ON dl.device_id = d.id AND dl.status = 'active' AND dl.checkin_at IS NULL
-GROUP BY c.id, c.name, c.location, c.total_devices;
+WHERE c.deleted_at IS NULL
+GROUP BY c.id, c.name, c.display_name, c.location, c.total_devices, c.deleted_at, c.allow_manual_entry, c.enable_charge_tracking;
 
 -- ================================================
 -- Row Level Security (RLS) – להפעיל בסביבת ייצור

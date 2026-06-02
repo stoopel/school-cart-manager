@@ -60,7 +60,7 @@ export default function StationHome() {
     // Fetch cart details
     const { data: cartData, error } = await supabase
       .from('carts')
-      .select('id, name, display_name, location')
+      .select('id, name, display_name, location, allow_manual_entry, enable_charge_tracking')
       .eq('id', cartId)
       .is('deleted_at', null)
       .single()

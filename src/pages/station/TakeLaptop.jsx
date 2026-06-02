@@ -15,6 +15,12 @@ export default function TakeLaptop({ cart, onDone }) {
   const scannerRef = useRef(null)
 
   useEffect(() => {
+    if (cart?.allow_manual_entry === false && scanMode !== 'qr') {
+      setScanMode('qr')
+    }
+  }, [cart, scanMode])
+
+  useEffect(() => {
     if (cart) {
       loadDevices()
 
@@ -238,16 +244,18 @@ export default function TakeLaptop({ cart, onDone }) {
       </div>
       <div className="station-flow-body">
         {/* Mode toggle */}
-        <div className="flex gap-3">
-          <button
-            className={`btn ${scanMode === 'qr' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => safeSetScanMode('qr')}
-          >📷 סריקת QR</button>
-          <button
-            className={`btn ${scanMode === 'number' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => safeSetScanMode('number')}
-          >🔢 הקלדת מספר</button>
-        </div>
+        {cart?.allow_manual_entry !== false && (
+          <div className="flex gap-3">
+            <button
+              className={`btn ${scanMode === 'qr' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => safeSetScanMode('qr')}
+            >📷 סריקת QR</button>
+            <button
+              className={`btn ${scanMode === 'number' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => safeSetScanMode('number')}
+            >🔢 הקלדת מספר</button>
+          </div>
+        )}
 
         {errorMsg && <div className="station-error">{errorMsg}</div>}
 

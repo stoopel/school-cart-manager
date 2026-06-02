@@ -17,12 +17,14 @@ SELECT
   COUNT(d.id) FILTER (WHERE d.deleted_at IS NULL) AS registered_devices,
   COUNT(dl.id) FILTER (WHERE dl.status = 'active' AND dl.checkin_at IS NULL) AS active_loans,
   (c.total_devices - COUNT(dl.id) FILTER (WHERE dl.status = 'active' AND dl.checkin_at IS NULL)) AS available_devices,
-  c.deleted_at
+  c.deleted_at,
+  c.allow_manual_entry,
+  c.enable_charge_tracking
 FROM carts c
 LEFT JOIN devices d ON c.id = d.cart_id AND d.deleted_at IS NULL
 LEFT JOIN device_loans dl ON dl.device_id = d.id AND dl.status = 'active' AND dl.checkin_at IS NULL
 WHERE c.deleted_at IS NULL
-GROUP BY c.id, c.name, c.display_name, c.location, c.total_devices, c.deleted_at;
+GROUP BY c.id, c.name, c.display_name, c.location, c.total_devices, c.deleted_at, c.allow_manual_entry, c.enable_charge_tracking;
 
 -- 3. עדכון ה-VIEW unreturned_loans לסנן עגלות ומחשבים מחוקים לוגית
 CREATE OR REPLACE VIEW unreturned_loans AS

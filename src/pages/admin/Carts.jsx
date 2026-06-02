@@ -163,16 +163,28 @@ export default function Carts() {
     loadCarts()
   }
 
-  function openEditModal(cart) {
+  async function openEditModal(cart) {
+    setError('')
+    const { data: rawCart, error: fetchErr } = await supabase
+      .from('carts')
+      .select('id, name, display_name, location, total_devices, kiosk_code, allow_manual_entry, enable_charge_tracking')
+      .eq('id', cart.id)
+      .maybeSingle()
+
+    if (fetchErr || !rawCart) {
+      alert('שגיאה בטעינת נתוני העגלה: ' + (fetchErr?.message || 'שגיאה כללית'))
+      return
+    }
+
     setCartForm({
-      id: cart.id,
-      name: cart.name,
-      display_name: cart.display_name || '',
-      location: cart.location || '',
-      total_devices: cart.total_devices || '',
-      kiosk_code: cart.kiosk_code || '',
-      allow_manual_entry: cart.allow_manual_entry !== false,
-      enable_charge_tracking: cart.enable_charge_tracking !== false
+      id: rawCart.id,
+      name: rawCart.name,
+      display_name: rawCart.display_name || '',
+      location: rawCart.location || '',
+      total_devices: rawCart.total_devices || '',
+      kiosk_code: rawCart.kiosk_code || '',
+      allow_manual_entry: rawCart.allow_manual_entry !== false,
+      enable_charge_tracking: rawCart.enable_charge_tracking !== false
     })
     setShowEditCart(true)
   }

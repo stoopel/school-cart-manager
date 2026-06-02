@@ -5,6 +5,9 @@ supabase_client.py - v3
 
 import requests, json, os, sys, threading, time, logging
 from datetime import datetime
+import ssl
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 log = logging.getLogger(__name__)
 
@@ -13,8 +16,17 @@ if getattr(sys, 'frozen', False):
 else:
     _DIR = os.path.dirname(os.path.abspath(__file__))
 
-with open(os.path.join(_DIR, "config.json"), encoding="utf-8-sig") as f:
-    _CFG = json.load(f)
+def load_obfuscated_config(filepath):
+    with open(filepath, "rb") as f:
+        data = f.read()
+    try:
+        return json.loads(data.decode("utf-8-sig"))
+    except Exception:
+        key = b"CartAgentSecureKey2026!"
+        decrypted = bytes(data[i] ^ key[i % len(key)] for i in range(len(data)))
+        return json.loads(decrypted.decode("utf-8"))
+
+_CFG = load_obfuscated_config(os.path.join(_DIR, "config.json"))
 
 SUPABASE_URL = _CFG["supabase_url"]
 SUPABASE_KEY = _CFG["supabase_key"]
@@ -22,7 +34,7 @@ HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
-    "Prefer": "return=representation",
+    "Prefer": "return=minimal",
 }
 
 

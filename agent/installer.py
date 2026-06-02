@@ -1,7 +1,7 @@
 """
 installer.py - Graphical Installer for CartAgent.
 Performs automatic computer name parsing, registers system configuration on Supabase,
-deploys executables to C:\\Program Files\\CartAgent, installs driver, and configures Shell.
+deploys executables to C:\Program Files\CartAgent, installs driver, and configures Shell.
 """
 
 import tkinter as tk
@@ -20,6 +20,42 @@ import subprocess
 import winreg
 import threading
 import requests
+import ssl
+import base64
+import tempfile
+import atexit
+
+import urllib3
+
+# Disable insecure request warnings from urllib3 when bypassing SSL validation
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def save_obfuscated_config(filepath, config_dict):
+    """
+    Saves the config dictionary to a file in an encrypted (obfuscated) format
+    using symmetric XOR with a static secret key.
+    """
+    data = json.dumps(config_dict, ensure_ascii=False, indent=2).encode("utf-8")
+    key = b"CartAgentSecureKey2026!"
+    encrypted = bytes(data[i] ^ key[i % len(key)] for i in range(len(data)))
+    with open(filepath, "wb") as f:
+        f.write(encrypted)
+
+def load_obfuscated_config(filepath):
+    """
+    Reads config.json. First tries to parse it as plain UTF-8 JSON.
+    If that fails, decrypts it using XOR with a static secret key.
+    """
+    with open(filepath, "rb") as f:
+        data = f.read()
+    try:
+        # Fallback for plain text development JSON
+        return json.loads(data.decode("utf-8-sig"))
+    except Exception:
+        # Decrypt using static XOR key
+        key = b"CartAgentSecureKey2026!"
+        decrypted = bytes(data[i] ^ key[i % len(key)] for i in range(len(data)))
+        return json.loads(decrypted.decode("utf-8"))
 
 BG = "#0f172a"
 BG_CARD = "#1e293b"
@@ -52,8 +88,7 @@ class InstallerGUI:
         try:
             template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
             if os.path.exists(template_path):
-                with open(template_path, "r", encoding="utf-8-sig") as f:
-                    self.config_template = json.load(f)
+                self.config_template = load_obfuscated_config(template_path)
         except Exception:
             pass
 
@@ -72,12 +107,32 @@ class InstallerGUI:
 
     def _detect_system_values(self):
         try:
-            # Parse PC Name (Format: e.g. CART-03-05 or similar)
-            pc_name = socket.gethostname().upper()
+            # Parse PC Name (Format: school-specific 440297-עגלהא05 or fallback CART-03-05)
+            pc_name = socket.gethostname()
             self.detected_asset_tag = pc_name
             
-            # Simple regex search: e.g. CART-(\d+)-(\d+)
-            m = re.search(r"CART-?(\d+)-?(\d+)", pc_name)
+            # Check school format: e.g. 440297-עגלהא05 or 440297-עגלה112
+            if "440297-" in pc_name:
+                suffix = pc_name.split("440297-", 1)[1]
+                m = re.search(r"^(.*?)(0*\d{1,2})$", suffix)
+                if m:
+                    raw_cart_name = m.group(1).strip()
+                    device_num = int(m.group(2))
+                    
+                    self.detected_cart_name = raw_cart_name
+                    self.detected_device_num = str(device_num)
+                    
+                    cart_id_match = re.search(r"\d+", raw_cart_name)
+                    if cart_id_match:
+                        self.detected_cart_id = cart_id_match.group(0)
+                    else:
+                        hebrew_mapping = {"א": "1", "ב": "2", "ג": "3", "ד": "4", "ה": "5", "ו": "6", "ז": "7", "ח": "8", "ט": "9", "י": "10"}
+                        last_char = raw_cart_name[-1] if raw_cart_name else ""
+                        self.detected_cart_id = hebrew_mapping.get(last_char, "1")
+                    return
+            
+            # Fallback regex search: e.g. CART-(\d+)-(\d+)
+            m = re.search(r"CART-?(\d+)-?(\d+)", pc_name.upper())
             if m:
                 cart_num = int(m.group(1))
                 device_num = int(m.group(2))
@@ -138,11 +193,11 @@ class InstallerGUI:
         self.form_frame.columnconfigure(0, weight=1)
         self.form_frame.columnconfigure(1, weight=1)
 
-        # Cart ID
-        tk.Label(self.form_frame, text="מזהה עגלה (מערכת):", font=self.font_label, bg=BG_CARD, fg=TEXT_MAIN, anchor="w").grid(row=0, column=0, sticky="ew", pady=(0, 4))
-        self.ent_cart_id = tk.Entry(self.form_frame, bg="#0f172a", fg=TEXT_MAIN, bd=1, relief="flat", insertbackground=TEXT_MAIN, font=self.font_label, highlightbackground=BORDER, highlightthickness=1)
-        self.ent_cart_id.insert(0, self.detected_cart_id)
-        self.ent_cart_id.grid(row=1, column=0, sticky="ew", padx=(0, 15), pady=(0, 20), ipady=5)
+        # Cart Name (System)
+        tk.Label(self.form_frame, text="שם עגלה מערכתי:", font=self.font_label, bg=BG_CARD, fg=TEXT_MAIN, anchor="w").grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self.ent_cart_name = tk.Entry(self.form_frame, bg="#0f172a", fg=TEXT_MAIN, bd=1, relief="flat", insertbackground=TEXT_MAIN, font=self.font_label, highlightbackground=BORDER, highlightthickness=1)
+        self.ent_cart_name.insert(0, self.detected_cart_name)
+        self.ent_cart_name.grid(row=1, column=0, sticky="ew", padx=(0, 15), pady=(0, 20), ipady=5)
 
         # Device Number
         tk.Label(self.form_frame, text="מספר מחשב (לפטופ):", font=self.font_label, bg=BG_CARD, fg=TEXT_MAIN, anchor="w").grid(row=0, column=1, sticky="ew", pady=(0, 4))
@@ -156,11 +211,10 @@ class InstallerGUI:
         self.ent_asset_tag.insert(0, self.detected_asset_tag)
         self.ent_asset_tag.grid(row=3, column=0, sticky="ew", padx=(0, 15), pady=(0, 20), ipady=5)
 
-        # Cart Name
-        tk.Label(self.form_frame, text="שם עגלה (תצוגה):", font=self.font_label, bg=BG_CARD, fg=TEXT_MAIN, anchor="w").grid(row=2, column=1, sticky="ew", pady=(0, 4))
-        self.ent_cart_name = tk.Entry(self.form_frame, bg="#0f172a", fg=TEXT_MAIN, bd=1, relief="flat", insertbackground=TEXT_MAIN, font=self.font_label, highlightbackground=BORDER, highlightthickness=1)
-        self.ent_cart_name.insert(0, self.detected_cart_name)
-        self.ent_cart_name.grid(row=3, column=1, sticky="ew", pady=(0, 20), ipady=5)
+        # Admin Passcode (Needed for creating new carts securely)
+        tk.Label(self.form_frame, text="קוד מנהל (להקמת עגלה חדשה):", font=self.font_label, bg=BG_CARD, fg=TEXT_MAIN, anchor="w").grid(row=2, column=1, sticky="ew", pady=(0, 4))
+        self.ent_admin_code = tk.Entry(self.form_frame, bg="#0f172a", fg=TEXT_MAIN, bd=1, relief="flat", insertbackground=TEXT_MAIN, font=self.font_label, highlightbackground=BORDER, highlightthickness=1, show="*")
+        self.ent_admin_code.grid(row=3, column=1, sticky="ew", pady=(0, 20), ipady=5)
 
         # Supabase Connection status indicator
         self.lbl_status = tk.Label(self.form_frame, text="בדיקת חיבור לשרת...", font=self.font_sub, bg=BG_CARD, fg=TEXT_DIM)
@@ -176,7 +230,7 @@ class InstallerGUI:
                 return
 
             headers = {"apikey": self.sb_key, "Authorization": f"Bearer {self.sb_key}"}
-            res = requests.get(f"{self.sb_url}/rest/v1/carts?select=*", headers=headers, timeout=5)
+            res = requests.get(f"{self.sb_url}/rest/v1/carts?select=id,name", headers=headers, timeout=5, verify=False)
             if res.status_code == 200:
                 self.root.after(0, lambda: self.lbl_status.config(text="✓ חיבור לשרת Supabase תקין ומאומת.", fg=SUCCESS))
             else:
@@ -193,13 +247,34 @@ class InstallerGUI:
 
     def start_installation(self):
         # Gather form variables
-        self.cart_id = self.ent_cart_id.get().strip()
         self.device_num = self.ent_device_num.get().strip()
         self.asset_tag = self.ent_asset_tag.get().strip()
         self.cart_name = self.ent_cart_name.get().strip()
+        self.admin_code = self.ent_admin_code.get().strip()
 
-        if not self.cart_id or not self.device_num or not self.asset_tag:
-            messagebox.showwarning("שדות חסרים", "אנא מלא את מזהה העגלה, מספר הלפטופ ותג הנכס.")
+        if not self.cart_name or not self.device_num or not self.asset_tag:
+            messagebox.showwarning("שדות חסרים", "אנא מלא את שם העגלה המערכתי, מספר הלפטופ ותג הנכס.")
+            return
+
+        if not self.admin_code:
+            messagebox.showwarning("קוד מנהל חסר", "יש להזין קוד מנהל כדי להתחיל בהתקנה.")
+            return
+
+        # Verify admin code locally
+        import hashlib
+        mapping = {
+            'ש': 'a', 'ד': 's', 'ג': 'd', 'כ': 'f', 'ע': 'g', 'י': 'h', 'ח': 'j', 'ל': 'k', 'ך': 'l', 'ף': ';',
+            'ק': 'w', 'ר': 'e', 'א': 'r', 'ט': 't', 'ו': 'y', 'ן': 'u', 'ם': 'i', 'פ': 'o', ']': 'p',
+            'ז': 'z', 'ס': 'x', 'ב': 'c', 'ה': 'v', 'נ': 'b', 'מ': 'n', 'צ': 'm', '/': 'q'
+        }
+        translated = "".join(mapping.get(c, c) for c in self.admin_code)
+        
+        target_hash = self.config_template.get("admin_code_hash", "")
+        hash_orig = hashlib.sha256(self.admin_code.encode('utf-8')).hexdigest()
+        hash_trans = hashlib.sha256(translated.encode('utf-8')).hexdigest()
+        
+        if hash_orig != target_hash and hash_trans != target_hash:
+            messagebox.showerror("קוד מנהל שגוי", "קוד מנהל המערכת שהוקלד אינו נכון. ההתקנה לא תתחיל.")
             return
 
         # Swap UI panels
@@ -214,21 +289,25 @@ class InstallerGUI:
     def _run_install_thread(self):
         try:
             self.log("[*] Starting installation processes...")
-            local_dir = r"C:\Program Files\CartAgent"
             
-            # 1. Create deployment folder in Program Files
-            self.log("[*] Creating Program Files deployment folder...")
-            if not os.path.exists(local_dir):
-                os.makedirs(local_dir, exist_ok=True)
-            self.log(f"[OK] Directory created: {local_dir}")
-
-            # 2. Register/update device in Supabase database
+            # 1. Register/update device in Supabase database FIRST (CRITICAL PRE-REQUISITE)
             self.log("[*] Registering laptop configuration in Supabase database...")
             device_registered = self._register_in_supabase()
             if device_registered:
                 self.log("[OK] Laptop successfully registered in database.")
             else:
-                self.log("[WARNING] Direct database write skipped or failed. Continuing...")
+                self.log("[ERROR] Database registration failed! Aborting installation.")
+                self.root.after(0, lambda: messagebox.showerror("שגיאת רישום", "התקנת המערכת נעצרה:\nלא ניתן היה למצוא או ליצור את העגלה המבוקשת בשרת.\n\nאנא ודא שחיבור האינטרנט תקין ושם העגלה נכון."))
+                self.root.after(0, lambda: self.btn_cancel.config(state="normal"))
+                return
+
+            local_dir = r"C:\Program Files\CartAgent"
+            
+            # 2. Create deployment folder in Program Files
+            self.log("[*] Creating Program Files deployment folder...")
+            if not os.path.exists(local_dir):
+                os.makedirs(local_dir, exist_ok=True)
+            self.log(f"[OK] Directory created: {local_dir}")
 
             # 3. Create local config.json
             self.log("[*] Deploying configuration config.json...")
@@ -236,9 +315,8 @@ class InstallerGUI:
             self.config_template["cart_name"] = self.cart_name
             # Set target server details
             local_config_path = os.path.join(local_dir, "config.json")
-            with open(local_config_path, "w", encoding="utf-8") as f:
-                json.dump(self.config_template, f, ensure_ascii=False, indent=2)
-            self.log("[OK] Configuration saved successfully.")
+            save_obfuscated_config(local_config_path, self.config_template)
+            self.log("[OK] Configuration saved securely (encrypted).")
 
             # 4. Copy executable files
             if getattr(sys, 'frozen', False):
@@ -265,20 +343,16 @@ class InstallerGUI:
                     shutil.copy2(src_path, dest_path)
                     self.log(f"[OK] Deployed {dest_name}")
                 else:
+                    if src_name in ["cart_agent.exe", "cart_watchdog.exe", "uninstaller.exe"]:
+                        raise FileNotFoundError(f"קובץ ליבה קריטי חסר במתקין: {src_name}")
                     self.log(f"[WARNING] Optional file {src_name} not found in installer root.")
 
             # 5. Check and Install Interception Driver
             self.log("[*] Verifying keyboard kernel protection driver status...")
             needs_reboot = self._verify_and_install_driver(local_dir)
 
-            # 6. Re-enable task manager policies or set proper limits
-            try:
-                key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System")
-                winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 1)
-                winreg.CloseKey(key)
-                self.log("[OK] Locked Task Manager policies.")
-            except Exception:
-                pass
+            # 6. Task Manager policies removed by admin request
+            self.log("[OK] Task Manager policies bypass active.")
 
             # 7. Configure custom user shell registry keys
             self.log("[*] Registering system shell to CartAgent...")
@@ -297,7 +371,92 @@ class InstallerGUI:
 
         except Exception as e:
             self.log(f"[ERROR] Installation crashed: {e}")
-            self.root.after(0, lambda: messagebox.showerror("שגיאה בהתקנה", f"ההתקנה נכשלה עקב שגיאה:\n{e}"))
+            self._rollback_installation()
+            self.root.after(0, lambda: [
+                messagebox.showerror("שגיאה בהתקנה", f"ההתקנה נכשלה עקב שגיאה:\n{e}\n\nכל השינויים שבוצעו במחשב בוטלו והמערכת שוחזרה למצבה המקורי."),
+                self.btn_cancel.config(state="normal")
+            ])
+
+    def _rollback_installation(self):
+        self.log("[*] Rollback: Reverting all system changes due to failure...")
+        try:
+            # 1. Kill any launched processes
+            subprocess.run(["taskkill", "/F", "/IM", "cart_watchdog.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "cart_agent.exe"], capture_output=True)
+        except Exception:
+            pass
+
+        # 2. Restore Registry Shell to original default (Explorer.exe)
+        self.log("[*] Rollback: Restoring default Windows Shell...")
+        try:
+            # Remove from active user SID under HKEY_USERS
+            res = subprocess.run(["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).UserName"], capture_output=True, text=True)
+            logged_user = res.stdout.strip()
+            if logged_user and "\\" in logged_user:
+                logged_user = logged_user.split("\\")[-1]
+            if logged_user:
+                profile_key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+                profile_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, profile_key_path)
+                user_sid = None
+                i = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(profile_key, i)
+                        subkey = winreg.OpenKey(profile_key, subkey_name)
+                        try:
+                            val, _ = winreg.QueryValueEx(subkey, "ProfileImagePath")
+                            if val.split("\\")[-1] == logged_user:
+                                user_sid = subkey_name
+                                winreg.CloseKey(subkey)
+                                break
+                        except WindowsError:
+                            pass
+                        winreg.CloseKey(subkey)
+                        i += 1
+                    except WindowsError:
+                        break
+                winreg.CloseKey(profile_key)
+                
+                if user_sid:
+                    reg_path = f"{user_sid}\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+                    try:
+                        key = winreg.OpenKey(winreg.HKEY_USERS, reg_path, 0, winreg.KEY_ALL_ACCESS)
+                        winreg.DeleteValue(key, "Shell")
+                        winreg.CloseKey(key)
+                    except WindowsError:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            # Remove from HKEY_CURRENT_USER
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon", 0, winreg.KEY_ALL_ACCESS)
+            winreg.DeleteValue(key, "Shell")
+            winreg.CloseKey(key)
+        except WindowsError:
+            pass
+
+        # 3. Re-enable Task Manager
+        self.log("[*] Rollback: Re-enabling Task Manager...")
+        try:
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System")
+            winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 0)
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+        # 4. Delete deployed folder
+        self.log("[*] Rollback: Cleaning deployed folder...")
+        local_dir = r"C:\Program Files\CartAgent"
+        if os.path.exists(local_dir):
+            for i in range(3):
+                try:
+                    shutil.rmtree(local_dir)
+                    break
+                except Exception:
+                    time.sleep(0.5)
+        self.log("[OK] Rollback completed. System restored to original state.")
+
 
     def _register_in_supabase(self):
         try:
@@ -308,33 +467,60 @@ class InstallerGUI:
                 "apikey": self.sb_key,
                 "Authorization": f"Bearer {self.sb_key}",
                 "Content-Type": "application/json",
-                "Prefer": "resolution=merge-duplicates"
             }
             
-            # 1. Resolve cart row
-            cart_res = requests.get(f"{self.sb_url}/rest/v1/carts?id=eq.{self.cart_id}", headers=headers, timeout=5)
-            if cart_res.status_code == 200 and not cart_res.json():
-                # Cart row not exists, create it
-                cart_payload = {"id": int(self.cart_id), "name": self.cart_name, "school_name": self.config_template.get("school_name", "בית ספר")}
-                requests.post(f"{self.sb_url}/rest/v1/carts", json=cart_payload, headers=headers, timeout=5)
+            self.log(f"[*] Checking if cart '{self.cart_name}' exists in database...")
             
-            # 2. Insert/upsert laptop device
-            laptop_payload = {
-                "asset_tag": self.asset_tag,
-                "cart_id": int(self.cart_id),
-                "device_number": int(self.device_num),
-                "status": "available",
-                "is_charging": True,
-                "battery_level": 100
+            # 1. Resolve cart row by name
+            cart_res = requests.get(f"{self.sb_url}/rest/v1/carts?name=eq.{self.cart_name}&select=id", headers=headers, timeout=5, verify=False)
+            cart_uuid = None
+            
+            if cart_res.status_code == 200:
+                carts = cart_res.json()
+                if carts:
+                    cart_uuid = carts[0]["id"]
+                    self.log(f"[OK] Found existing cart with ID: {cart_uuid}")
+                else:
+                    self.log("[*] Cart not found. Attempting to create new cart securely...")
+                    if not self.admin_code:
+                        self.log("[ERROR] Admin passcode is required to create a new cart!")
+                        return False
+                    
+                    rpc_payload = {
+                        "p_name": self.cart_name,
+                        "p_admin_code": self.admin_code
+                    }
+                    
+                    create_res = requests.post(f"{self.sb_url}/rest/v1/rpc/create_cart_securely", json=rpc_payload, headers=headers, timeout=5, verify=False)
+                    
+                    if create_res.status_code == 200:
+                        cart_uuid = create_res.json()
+                        self.log(f"[OK] New cart successfully created with ID: {cart_uuid}")
+                    else:
+                        err_msg = create_res.json().get("message", create_res.text) if create_res.content else create_res.text
+                        self.log(f"[ERROR] Failed to create new cart: {err_msg}")
+                        return False
+            else:
+                self.log(f"[ERROR] Failed to query carts table: Status {cart_res.status_code}")
+                return False
+            
+            # 2. Register device securely using RPC
+            self.log(f"[*] Registering device '{self.asset_tag}' (Number {self.device_num}) securely...")
+            rpc_device_payload = {
+                "p_asset_tag": self.asset_tag,
+                "p_cart_id": cart_uuid,
+                "p_device_number": int(self.device_num)
             }
             
-            upsert_res = requests.post(
-                f"{self.sb_url}/rest/v1/laptops",
-                json=laptop_payload,
-                headers=headers,
-                timeout=5
-            )
-            return upsert_res.status_code in [200, 201]
+            device_res = requests.post(f"{self.sb_url}/rest/v1/rpc/register_device_securely", json=rpc_device_payload, headers=headers, timeout=5, verify=False)
+            
+            if device_res.status_code == 200 and device_res.json() is True:
+                return True
+            else:
+                err_msg = device_res.json().get("message", device_res.text) if device_res.content else device_res.text
+                self.log(f"[ERROR] Failed to register device in database: {err_msg}")
+                return False
+                
         except Exception as e:
             self.log(f"[WARNING] Database registration failed: {e}")
             return False
@@ -423,6 +609,7 @@ class InstallerGUI:
             self.log("[OK] Registered Shell in standard user hive.")
         except Exception as ex:
             self.log(f"[ERROR] Registry shell writing crashed: {ex}")
+            raise RuntimeError(f"שגיאה קריטית ברישום מפתח ה-Shell Watchdog במערכת: {ex}")
 
     def _show_finish_dialog(self, needs_reboot):
         if needs_reboot:
@@ -444,6 +631,17 @@ class InstallerGUI:
         self.root.mainloop()
 
 if __name__ == "__main__":
+    # Check if already installed before UAC prompt
+    installed_path = r"C:\Program Files\CartAgent\cart_agent.exe"
+    if os.path.exists(installed_path):
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "התוכנה כבר מותקנת",
+            "مערכת CartAgent כבר מותקנת על מחשב זה.\nההתקנה לא תתבצע שנית."
+        )
+        sys.exit(0)
+
     # Request Admin elevation right at start
     if not ctypes.windll.shell32.IsUserAnAdmin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)

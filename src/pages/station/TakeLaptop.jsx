@@ -179,8 +179,8 @@ export default function TakeLaptop({ cart, onDone }) {
     setResult({ device, student })
     setStep(STEPS.SUCCESS)
 
-    // Auto-return after 5s
-    setTimeout(() => onDone(), 5000)
+    // Auto-return after 2s
+    setTimeout(() => onDone(), 2000)
   }
 
   // ─── STEP: ID ──────────────────────────────
@@ -296,7 +296,7 @@ export default function TakeLaptop({ cart, onDone }) {
               <div style={{ marginTop: 8, color: '#fbbf24' }}>⚠️ זכור להחזיר בסוף השימוש!</div>
             </div>
             <div style={{ marginTop: 20, fontSize: '0.85rem', color: 'var(--station-muted)' }}>
-              חוזר לתחנה בעוד מספר שניות...
+              חוזר לתחנה מיד...
             </div>
           </div>
         </div>

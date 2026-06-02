@@ -157,7 +157,7 @@ export default function ReturnLaptop({ cart, onDone }) {
 
     if (error) { setErrorMsg('שגיאה בהחזרה. נסה שנית.'); return }
     setStep(STEPS.SUCCESS)
-    setTimeout(() => onDone(), 4000)
+    setTimeout(() => onDone(), 1500)
   }
 
   function duration(from) {
@@ -285,7 +285,7 @@ export default function ReturnLaptop({ cart, onDone }) {
         </div>
 
         <div style={{ textAlign: 'center', fontSize: '0.9rem', color: 'var(--station-muted)', marginTop: 8 }}>
-          חוזר לתחנה בעוד מספר שניות...
+          חוזר לתחנה מיד...
         </div>
 
       </div>

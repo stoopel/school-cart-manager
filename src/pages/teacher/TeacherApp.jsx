@@ -109,6 +109,21 @@ function LessonCard({ lesson, now, onRefresh }) {
     setBusy(false); onRefresh()
   }
 
+  async function extendLesson(minutes) {
+    setBusy(true)
+    const currentEndTime = new Date(lesson.end_time)
+    const newEndTime = new Date(currentEndTime.getTime() + minutes * 60000)
+    const newDuration = (lesson.duration_minutes || 45) + minutes
+    await supabase.from('lessons')
+      .update({ 
+        end_time: newEndTime.toISOString(),
+        duration_minutes: newDuration 
+      })
+      .eq('id', lesson.id)
+    setBusy(false)
+    onRefresh()
+  }
+
   const color  = isScheduled ? '#6366f1' : secRemaining < 300 ? '#f97316' : '#22c55e'
   const border = isScheduled ? 'rgba(99,102,241,0.4)' : 'rgba(34,197,94,0.4)'
 
@@ -178,31 +193,57 @@ function LessonCard({ lesson, now, onRefresh }) {
 
       {/* Actions */}
       {!isScheduled && (
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={() => act({ is_locked: !lesson.is_locked })}
-            disabled={busy}
-            style={{
-              flex: 1, padding: '10px 0', borderRadius: 12, border: 'none',
-              cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'Heebo,sans-serif',
-              background: lesson.is_locked ? '#6366f1' : 'rgba(255,255,255,0.07)',
-              color: '#f1f5f9',
-            }}
-          >
-            {lesson.is_locked ? '🔓 שחרר' : '🔒 נעל'}
-          </button>
-          <button
-            onClick={() => { if (confirm('לסיים שיעור?')) act({ status: 'ended' }) }}
-            disabled={busy}
-            style={{
-              flex: 1, padding: '10px 0', borderRadius: 12, border: 'none',
-              cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'Heebo,sans-serif',
-              background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
-            }}
-          >
-            ⏹️ סיים
-          </button>
-        </div>
+        <>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={() => act({ is_locked: !lesson.is_locked })}
+              disabled={busy}
+              style={{
+                flex: 1, padding: '10px 0', borderRadius: 12, border: 'none',
+                cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'Heebo,sans-serif',
+                background: lesson.is_locked ? '#6366f1' : 'rgba(255,255,255,0.07)',
+                color: '#f1f5f9',
+              }}
+            >
+              {lesson.is_locked ? '🔓 שחרר' : '🔒 נעל'}
+            </button>
+            <button
+              onClick={() => { if (confirm('לסיים שיעור?')) act({ status: 'ended' }) }}
+              disabled={busy}
+              style={{
+                flex: 1, padding: '10px 0', borderRadius: 12, border: 'none',
+                cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', fontFamily: 'Heebo,sans-serif',
+                background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
+              }}
+            >
+              ⏹️ סיים
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+            <button
+              onClick={() => extendLesson(15)}
+              disabled={busy}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 12, border: '1px solid rgba(99,102,241,0.3)',
+                cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', fontFamily: 'Heebo,sans-serif',
+                background: 'rgba(99,102,241,0.08)', color: '#a5b4fc',
+              }}
+            >
+              ➕ הארך ב-15 דק'
+            </button>
+            <button
+              onClick={() => extendLesson(30)}
+              disabled={busy}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 12, border: '1px solid rgba(99,102,241,0.3)',
+                cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', fontFamily: 'Heebo,sans-serif',
+                background: 'rgba(99,102,241,0.08)', color: '#a5b4fc',
+              }}
+            >
+              ➕ הארך ב-30 דק'
+            </button>
+          </div>
+        </>
       )}
       {isScheduled && (
         <button
@@ -645,6 +686,16 @@ function TeacherDashboard({ teacher, onLogout }) {
 
   const load = useCallback(async () => {
     setLoading(true)
+    const nowIso = new Date().toISOString()
+    try {
+      await supabase
+        .from('lessons')
+        .update({ status: 'ended' })
+        .eq('status', 'active')
+        .lt('end_time', nowIso)
+    } catch (e) {
+      console.error('Error auto-ending lessons:', e)
+    }
     const { data } = await supabase
       .from('teacher_lessons')
       .select('*')

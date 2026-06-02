@@ -477,7 +477,24 @@ class CartAgent:
     def _on_lesson_changed(self, record: dict):
         status    = record.get("status", "active")
         is_locked = record.get("is_locked", False)
-        log.info(f"Lesson event: status={status} locked={is_locked}")
+        end_time_str = record.get("end_time")
+        log.info(f"Lesson event: status={status} locked={is_locked} end_time={end_time_str}")
+
+        # Update end_time if it changed
+        if end_time_str and self._lesson_timer:
+            try:
+                from datetime import datetime, timezone
+                new_end_dt = self._lesson_timer._parse(end_time_str)
+                if new_end_dt != self._lesson_timer.end_time:
+                    log.info(f"Realtime: Updating end_time from {self._lesson_timer.end_time} to {new_end_dt}")
+                    self._lesson_timer.end_time = new_end_dt
+                    
+                    # Update expected remaining at start and reset start_mono to prevent clock tampering false positives
+                    server_now = datetime.now(timezone.utc) + __import__('datetime').timedelta(seconds=self._lesson_timer.offset)
+                    self._lesson_timer.expected_remaining_at_start = (new_end_dt - server_now).total_seconds()
+                    self._lesson_timer.start_mono = time.monotonic()
+            except Exception as e:
+                log.error(f"Error updating end_time in realtime: {e}")
 
         if status in ("ended", "cancelled"):
             self._lock_lesson_ended()
@@ -575,7 +592,24 @@ class CartAgent:
             if status_data:
                 status = status_data.get("status", "active")
                 is_locked = status_data.get("is_locked", False)
+                end_time_str = status_data.get("end_time")
                 
+                # Update end_time if it changed
+                if end_time_str and self._lesson_timer:
+                    try:
+                        from datetime import datetime, timezone
+                        new_end_dt = self._lesson_timer._parse(end_time_str)
+                        if new_end_dt != self._lesson_timer.end_time:
+                            log.info(f"Polling: Updating end_time from {self._lesson_timer.end_time} to {new_end_dt}")
+                            self._lesson_timer.end_time = new_end_dt
+                            
+                            # Update expected remaining at start and reset start_mono to prevent clock tampering false positives
+                            server_now = datetime.now(timezone.utc) + __import__('datetime').timedelta(seconds=self._lesson_timer.offset)
+                            self._lesson_timer.expected_remaining_at_start = (new_end_dt - server_now).total_seconds()
+                            self._lesson_timer.start_mono = time.monotonic()
+                    except Exception as e:
+                        log.error(f"Error updating end_time in polling: {e}")
+
                 # אם השיעור הסתיים או בוטל
                 if status in ("ended", "cancelled"):
                     log.info("Smart Fallback Polling: Lesson ended/cancelled")

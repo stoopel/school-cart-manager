@@ -291,6 +291,13 @@
 .station-qr-area #qr-reader { width: 100% !important; }
 .station-qr-area #qr-reader video { border-radius: 14px; }
 
+/* Mirror camera preview for easier barcode/QR alignment */
+#qr-reader-return video,
+#qr-reader-take video {
+  transform: scaleX(-1) !important;
+  -webkit-transform: scaleX(-1) !important;
+}
+
 /* Number grid */
 .station-numgrid {
   display: grid;

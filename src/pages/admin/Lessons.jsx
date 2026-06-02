@@ -163,6 +163,16 @@ export default function Lessons() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    const nowIso = new Date().toISOString()
+    try {
+      await supabase
+        .from('lessons')
+        .update({ status: 'ended' })
+        .eq('status', 'active')
+        .lt('end_time', nowIso)
+    } catch (e) {
+      console.error('Error auto-ending lessons:', e)
+    }
     const [{ data: lessons }, { data: tchrs }] = await Promise.all([
       supabase.from('active_lessons').select('*').order('start_time'),
       supabase.from('teachers').select('id,name').eq('is_active', true).order('name'),

@@ -106,6 +106,21 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
     setBusy(false); onRefresh()
   }
 
+  async function extendLesson(minutes) {
+    setBusy(true)
+    const currentEndTime = new Date(lesson.end_time)
+    const newEndTime = new Date(currentEndTime.getTime() + minutes * 60000)
+    const newDuration = (lesson.duration_minutes || 45) + minutes
+    await supabase.from('lessons')
+      .update({ 
+        end_time: newEndTime.toISOString(),
+        duration_minutes: newDuration 
+      })
+      .eq('id', lesson.id)
+    setBusy(false)
+    onRefresh()
+  }
+
   const isLocked = lesson.is_locked
   const progressPercent = Math.min(100, ((nowTs - startTs) / (endTs - startTs)) * 100)
 
@@ -159,28 +174,48 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
 
         {/* Buttons */}
         {!isScheduled ? (
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => act({ is_locked: !isLocked })}
-              disabled={busy}
-              className={`flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm font-body transition-all active:scale-[0.98] ${
-                isLocked
-                  ? 'bg-primary text-white border-primary shadow-sm'
-                  : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              <span className="material-symbols-outlined text-sm">{isLocked ? 'lock_open' : 'lock'}</span>
-              {isLocked ? 'שחרר' : 'נעל'}
-            </button>
-            <button
-              onClick={() => { if (confirm('לסיים שיעור?')) act({ status: 'ended' }) }}
-              disabled={busy}
-              className="flex items-center justify-center gap-2 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm font-body hover:bg-red-100 active:scale-[0.98] transition-all"
-            >
-              <span className="material-symbols-outlined text-sm">stop_circle</span>
-              סיים
-            </button>
-          </div>
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => act({ is_locked: !isLocked })}
+                disabled={busy}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm font-body transition-all active:scale-[0.98] ${
+                  isLocked
+                    ? 'bg-primary text-white border-primary shadow-sm'
+                    : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <span className="material-symbols-outlined text-sm">{isLocked ? 'lock_open' : 'lock'}</span>
+                {isLocked ? 'שחרר' : 'נעל'}
+              </button>
+              <button
+                onClick={() => { if (confirm('לסיים שיעור?')) act({ status: 'ended' }) }}
+                disabled={busy}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm font-body hover:bg-red-100 active:scale-[0.98] transition-all"
+              >
+                <span className="material-symbols-outlined text-sm">stop_circle</span>
+                סיים
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <button
+                onClick={() => extendLesson(15)}
+                disabled={busy}
+                className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-body hover:bg-indigo-100 active:scale-[0.98] transition-all"
+              >
+                <span className="material-symbols-outlined text-sm">more_time</span>
+                הארך ב-15 דק'
+              </button>
+              <button
+                onClick={() => extendLesson(30)}
+                disabled={busy}
+                className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-body hover:bg-indigo-100 active:scale-[0.98] transition-all"
+              >
+                <span className="material-symbols-outlined text-sm">more_time</span>
+                הארך ב-30 דק'
+              </button>
+            </div>
+          </>
         ) : (
           <button
             onClick={() => { if (confirm('לבטל שיעור מתוכנן זה?')) act({ status: 'cancelled' }) }}

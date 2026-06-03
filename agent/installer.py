@@ -636,11 +636,12 @@ if __name__ == "__main__":
     if os.path.exists(installed_path):
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror(
-            "התוכנה כבר מותקנת",
-            "مערכת CartAgent כבר מותקנת על מחשב זה.\nההתקנה לא תתבצע שנית."
+        ans = messagebox.askyesno(
+            "עדכון גרסה",
+            "מערכת CartAgent כבר מותקנת על מחשב זה.\n\nהאם ברצונך לבצע עדכון גרסה / התקנה מחדש?"
         )
-        sys.exit(0)
+        if not ans:
+            sys.exit(0)
 
     # Request Admin elevation right at start
     if not ctypes.windll.shell32.IsUserAnAdmin():

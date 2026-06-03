@@ -606,13 +606,17 @@ class LockScreen:
         self.root.after(0, _do)
 
     def _open_wifi_panel(self):
-        """פותח את תפריט בחירת הרשתות של Windows באמצעות קריאת Win32 טהורה"""
+        """פותח את תפריט בחירת הרשתות של Windows באמצעות קריאת Win32 טהורה / ms-availablenetworks"""
         self._wifi_panel_active = True
         self.root.attributes("-topmost", False)
         try:
-            subprocess.Popen(["rundll32.exe", "van.dll,RunVAN"])
-        except Exception as e:
-            self.show_status("שגיאה בפתיחת תפריט הרשתות", ERROR)
+            # Modern Windows 11 URI scheme
+            os.startfile("ms-availablenetworks:")
+        except Exception:
+            try:
+                subprocess.Popen(["rundll32.exe", "van.dll,RunVAN"])
+            except Exception as e:
+                self.show_status("שגיאה בפתיחת תפריט הרשתות", ERROR)
             
         # ביטול טיימר קודם אם קיים
         if getattr(self, '_wifi_timer_id', None):
@@ -647,6 +651,8 @@ class LockScreen:
         self.lbl_display.config(text="")
         self.lbl_timer.config(text="")
         self.lbl_timer_label.config(text="")
+        self._verifying = False
+        self.lbl_status.config(text="")
         
         if self.loan_data:
             name  = self.loan_data.get("student_name", "")
@@ -720,6 +726,7 @@ class LockScreen:
         """נועל חזרה – נקרא כשהשאלה נסגרת מרחוק"""
         self._unlocked = False
         self.entered_id = ""
+        self._verifying = False
         def _do():
             install_keyboard_hook()
             set_task_manager_enabled(False)

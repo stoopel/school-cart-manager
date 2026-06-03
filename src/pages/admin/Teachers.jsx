@@ -63,9 +63,14 @@ export default function Teachers() {
 
       {/* Actions */}
       <div className="flex items-center justify-between mb-4 gap-3" style={{ flexWrap: 'wrap' }}>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
-          + הוסף מורה
-        </button>
+        <div className="flex gap-2">
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+            + הוסף מורה
+          </button>
+          <a href="/teacher-legacy" target="_blank" className="btn btn-ghost" style={{ fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}>
+            🔗 פורטל מורים ישן (גיבוי)
+          </a>
+        </div>
         <input
           className="form-input"
           style={{ maxWidth: 280 }}

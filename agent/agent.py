@@ -177,13 +177,15 @@ class CartAgent:
 
         # 1. קוד אדמין - מעקף חירום פיזי מוחלט (מנהל מערכת)
         is_admin = False
-        if ADMIN_CODE and (entered == ADMIN_CODE or translated == ADMIN_CODE):
+        translated_alt = translated.replace('u', 'i')  # תומך בהקלדת 'שגצןמ2024' (כיוון ש-ן' ממופה ל-u במקום i)
+        if ADMIN_CODE and (entered == ADMIN_CODE or translated == ADMIN_CODE or translated_alt == ADMIN_CODE):
             is_admin = True
         elif ADMIN_CODE_HASH:
             import hashlib
             hashed_orig = hashlib.sha256(entered.encode('utf-8')).hexdigest()
             hashed_trans = hashlib.sha256(translated.encode('utf-8')).hexdigest()
-            if hashed_orig == ADMIN_CODE_HASH or hashed_trans == ADMIN_CODE_HASH:
+            hashed_trans_alt = hashlib.sha256(translated_alt.encode('utf-8')).hexdigest()
+            if hashed_orig == ADMIN_CODE_HASH or hashed_trans == ADMIN_CODE_HASH or hashed_trans_alt == ADMIN_CODE_HASH:
                 is_admin = True
 
         if is_admin:

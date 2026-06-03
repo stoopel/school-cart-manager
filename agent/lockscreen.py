@@ -652,7 +652,17 @@ class LockScreen:
         self.lbl_timer.config(text="")
         self.lbl_timer_label.config(text="")
         self._verifying = False
+        
+        # Ensure all widgets are visible (in case they were hidden by teacher lock or selection screen)
+        self.lbl_status.pack_forget()
+        self.lbl_display.master.pack(fill="x", pady=(0, 12))
+        if hasattr(self, 'pad_frame'):
+            self.pad_frame.pack()
+        self.btn_submit.pack(fill="x", pady=(10, 0))
+        self.lbl_status.pack(pady=(8, 0))
+        
         self.lbl_status.config(text="")
+        self.clear_selection_screen()
         
         if self.loan_data:
             name  = self.loan_data.get("student_name", "")

@@ -6,7 +6,7 @@ agent.py - v4
 import json, os, sys, threading, time, socket, ctypes, logging
 from datetime import datetime, timezone
 
-from lockscreen import LockScreen
+from lockscreen import LockScreen, start_explorer
 import supabase_client as db
 
 # ── Logging ───────────────────────────────────────────────────
@@ -140,6 +140,9 @@ class CartAgent:
 
     def start(self):
         log.info(f"Agent v4 started. asset_tag={ASSET_TAG}")
+        # Start explorer in background immediately on boot to enable Wi-Fi panel and prevent black screen delays
+        start_explorer()
+
         self.device_id = db.get_device_id_by_asset_tag(ASSET_TAG)
         self._refresh_loan_state("startup")
 
@@ -521,8 +524,19 @@ class CartAgent:
         self._lesson_timer = None
         if self._rt_lesson: self._rt_lesson.stop(); self._rt_lesson = None
         if self.screen:
-            self.screen.show_lesson_ended()
-            self.screen.relock("השיעור הסתיים. החזר את המחשב לתחנת העגלה. 🔌")
+            if self.loan_data:
+                self.screen.relock("השיעור הסתיים. בחר או הכנס שיעור חדש.")
+                try:
+                    pre_assigned = db.get_pre_assigned_lessons(self.loan_data["student_id"])
+                    if pre_assigned:
+                        self.screen.root.after(0, lambda: self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected))
+                        return
+                except Exception as e:
+                    log.error(f"Error checking pre-assigned lessons on lesson end: {e}")
+                self.screen.root.after(0, self.screen.show_lesson_code_prompt)
+            else:
+                self.screen.show_lesson_ended()
+                self.screen.relock("השיעור הסתיים. החזר את המחשב לתחנת העגלה. 🔌")
 
     def _lock_teacher_pause(self):
         log.info("Teacher locked screens")
@@ -538,7 +552,7 @@ class CartAgent:
         polling_counter = 0
         while self._running:
             time.sleep(1)
-            if not self._lesson_timer or not self._unlocked:
+            if not self._lesson_timer:
                 warned = False
                 continue
             

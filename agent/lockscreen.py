@@ -642,16 +642,22 @@ class LockScreen:
         self.root.after(0, self._apply_loan_state)
 
     def _apply_loan_state(self):
+        self._step = 1
+        self.entered_id = ""
+        self.lbl_display.config(text="")
+        self.lbl_timer.config(text="")
+        self.lbl_timer_label.config(text="")
+        
         if self.loan_data:
             name  = self.loan_data.get("student_name", "")
             klass = self.loan_data.get("class_name", "")
             self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
             self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {name} | כיתה {klass}")
-            self.btn_submit.config(state="normal")
         else:
             self.lbl_title.config(text="מחשב זה אינו רשום להשאלה", fg=WARNING)
-            self.lbl_subtitle.config(text="פנה לתחנת העגלה כדי לרשום את ההשאלה תחילה.")
-            self.btn_submit.config(state="disabled")
+            self.lbl_subtitle.config(text="הקש קוד מנהל לפתיחה, או פנה לקיוסק לרישום.")
+        
+        self.btn_submit.config(state="normal")
 
     def set_verifying(self, state: bool):
         self._verifying = state

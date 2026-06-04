@@ -295,6 +295,7 @@ class RealtimeSubscription:
         self._ws          = None
         self._running     = False
         self._ref         = 0
+        self.is_connected = False
 
     def start(self):
         self._running = True
@@ -302,6 +303,7 @@ class RealtimeSubscription:
 
     def stop(self):
         self._running = False
+        self.is_connected = False
         if self._ws:
             try: self._ws.close()
             except: pass
@@ -323,6 +325,7 @@ class RealtimeSubscription:
                   + f"/realtime/v1/websocket?apikey={SUPABASE_KEY}&vsn=1.0.0")
 
         def on_open(ws):
+            self.is_connected = True
             ws.send(json.dumps({
                 "topic": f"realtime:{self.channel}",
                 "event": "phx_join",
@@ -345,11 +348,19 @@ class RealtimeSubscription:
             except Exception as e:
                 log.error(f"Realtime msg error: {e}")
 
+        def _on_error(ws, e):
+            self.is_connected = False
+            log.error(f"WS err: {e}")
+
+        def _on_close(ws, c, m):
+            self.is_connected = False
+            log.info(f"WS closed: {c}")
+
         self._ws = websocket.WebSocketApp(
             ws_url,
             on_open=on_open, on_message=on_message,
-            on_error=lambda ws, e: log.error(f"WS err: {e}"),
-            on_close=lambda ws, c, m: log.info(f"WS closed: {c}"),
+            on_error=_on_error,
+            on_close=_on_close,
         )
         self._ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
 

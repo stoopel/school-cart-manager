@@ -639,6 +639,40 @@ class CartAgent:
         except Exception as e:
             log.error(f"Error in _async_poll_lesson_status: {e}")
 
+    def _async_apply_new_lesson(self, lesson_id):
+        try:
+            log.info(f"Applying new lesson: Fetching details for lesson_id={lesson_id}")
+            lesson = db.get_active_lesson_by_id(lesson_id)
+            if not lesson:
+                log.error(f"Applying new lesson failed: Active lesson {lesson_id} not found in DB.")
+                return
+
+            self._lesson_data = lesson
+            self._lesson_timer = LessonTimer(
+                lesson["end_time"],
+                server_now_str=lesson.get("server_now")
+            )
+            self._start_lesson_realtime(lesson["lesson_id"])
+
+            if not self._unlocked:
+                db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
+                if lesson.get("is_locked"):
+                    log.info("Applying new lesson: Assigned lesson is locked/paused by teacher.")
+                    self.screen.root.after(0, self._lock_teacher_pause)
+                else:
+                    log.info("Applying new lesson: Unlocking screen for student.")
+                    self.screen.root.after(0, lambda: self._do_unlock(self.loan_data["student_name"]))
+            else:
+                if lesson.get("is_locked"):
+                    log.info("Applying new lesson: New lesson is locked/paused by teacher.")
+                    self.screen.root.after(0, self._lock_teacher_pause)
+                else:
+                    log.info("Applying new lesson: Already unlocked, updating timer.")
+                    if self.screen:
+                        self.screen.update_lesson_timer(self._lesson_timer.format_remaining())
+        except Exception as e:
+            log.error(f"Error in _async_apply_new_lesson: {e}", exc_info=True)
+
     # ── Loan refresh ──────────────────────────────────────────
 
     def _refresh_loan_state(self, reason=""):
@@ -656,6 +690,24 @@ class CartAgent:
             if self.screen:
                 self.screen.set_loan_info(self.loan_data)
                 self.screen.relock("מחשב זה זמין לשימוש חדש.")
+        else:
+            # If the loan did not change, check if the lesson_id inside it changed
+            old_lesson_id = self.loan_data.get("lesson_id") if self.loan_data else None
+            new_lesson_id = new_loan.get("lesson_id") if new_loan else None
+
+            if old_lesson_id != new_lesson_id:
+                log.info(f"Lesson ID inside loan updated: {old_lesson_id} → {new_lesson_id}")
+                if self.loan_data:
+                    self.loan_data["lesson_id"] = new_lesson_id
+
+                if new_lesson_id:
+                    # Remote lesson assignment - auto join and unlock/pause
+                    threading.Thread(target=self._async_apply_new_lesson, 
+                                     args=(new_lesson_id,), daemon=True).start()
+                else:
+                    # Lesson was removed from the loan – lock/end lesson
+                    log.info("Lesson ID removed from loan. Relocking.")
+                    self._lock_lesson_ended()
 
     # ── Battery check on wake ─────────────────────────────────
 

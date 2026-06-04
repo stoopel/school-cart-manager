@@ -741,9 +741,13 @@ class LockScreen:
         self.lbl_title.config(text="📶 רשתות Wi-Fi זמינות", fg=ACCENT)
         self.lbl_subtitle.config(text="בחר רשת כדי להתחבר:")
         
+        # Bottom button row (pack FIRST at the bottom to prevent clipping)
+        btn_row = tk.Frame(self.wifi_container, bg=BG_CARD)
+        btn_row.pack(side=tk.BOTTOM, fill="x", pady=(15, 0))
+
         # Scrollable container
         canvas_frame = tk.Frame(self.wifi_container, bg=BG_CARD)
-        canvas_frame.pack(fill="both", expand=True)
+        canvas_frame.pack(side=tk.TOP, fill="both", expand=True)
         
         canvas = tk.Canvas(canvas_frame, bg=BG_CARD, bd=0, highlightthickness=0, height=250)
         scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
@@ -805,9 +809,7 @@ class LockScreen:
                         lbl_lock = tk.Label(item_frame, text="🔒", font=self.font_small, bg=BG_INPUT, fg=TEXT_DIM)
                         lbl_lock.pack(side=tk.LEFT, padx=(8, 0))
                         
-        # Bottom button row
-        btn_row = tk.Frame(self.wifi_container, bg=BG_CARD)
-        btn_row.pack(fill="x", pady=(15, 0))
+        # Buttons are packed inside the pre-allocated btn_row at the bottom
         
         btn_refresh = tk.Button(
             btn_row, text="🔄 רענן רשימה", font=self.font_small,
@@ -1144,7 +1146,29 @@ class LockScreen:
         """מעבר לשלב 2 – הכנסת קוד שיעור"""
         self._step = 2
         self.entered_id = ""
+        self._wifi_panel_active = False
         def _do():
+            self.clear_selection_screen()
+            if hasattr(self, 'wifi_container') and self.wifi_container:
+                try:
+                    self.wifi_container.destroy()
+                except Exception:
+                    pass
+                self.wifi_container = None
+            
+            # Repack title and subtitle at the top
+            self.lbl_title.pack_forget()
+            self.lbl_subtitle.pack_forget()
+            self.lbl_title.pack(pady=(0, 4))
+            self.lbl_subtitle.pack(pady=(0, 12))
+            
+            # Repack standard widgets
+            self.lbl_display.master.pack(fill="x", pady=(0, 12))
+            if hasattr(self, 'pad_frame'):
+                self.pad_frame.pack()
+            self.btn_submit.pack(fill="x", pady=(10, 0))
+            self.lbl_status.pack(pady=(8, 0))
+            
             self.lbl_display.config(text="")
             self.lbl_title.config(text="הכנס קוד שיעור (4 ספרות)", fg=ACCENT)
             self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך")
@@ -1196,6 +1220,28 @@ class LockScreen:
             self.root.deiconify()
             self.root.attributes("-topmost", True)
             self.root.focus_force()
+            
+            # Ensure standard widgets are packed if we are in step 1 or 2
+            if self._step in (1, 2):
+                self.clear_selection_screen()
+                if hasattr(self, 'wifi_container') and self.wifi_container:
+                    try:
+                        self.wifi_container.destroy()
+                    except Exception:
+                        pass
+                    self.wifi_container = None
+                
+                self.lbl_title.pack_forget()
+                self.lbl_subtitle.pack_forget()
+                self.lbl_title.pack(pady=(0, 4))
+                self.lbl_subtitle.pack(pady=(0, 12))
+                
+                self.lbl_display.master.pack(fill="x", pady=(0, 12))
+                if hasattr(self, 'pad_frame'):
+                    self.pad_frame.pack()
+                self.btn_submit.pack(fill="x", pady=(10, 0))
+                self.lbl_status.pack(pady=(8, 0))
+                
             self.lbl_status.config(text=message, fg=WARNING)
         self.root.after(0, _do)
 

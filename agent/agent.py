@@ -140,8 +140,6 @@ class CartAgent:
 
     def start(self):
         log.info(f"Agent v4 started. asset_tag={ASSET_TAG}")
-        # Start explorer in background immediately on boot to enable Wi-Fi panel and prevent black screen delays
-        start_explorer()
 
         self.device_id = db.get_device_id_by_asset_tag(ASSET_TAG)
         self._refresh_loan_state("startup")

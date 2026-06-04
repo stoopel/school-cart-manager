@@ -67,6 +67,7 @@ _interception_dll = None
 _interception_context = None
 _interception_thread = None
 _interception_running = False
+_wifi_panel_active = False
 
 # Scan Code Set 1 Whitelist for CartAgent input:
 # - Escape: 0x01
@@ -187,33 +188,53 @@ def _interception_thread_proc():
             res = dll.interception_receive(context, device, ctypes.byref(stroke), 1)
             if res > 0:
                 scan_code = stroke.key.code
-                if scan_code in ALLOWED_SCAN_CODES:
-                    dll.interception_send(context, device, ctypes.byref(stroke), 1)
+                base_code = scan_code & 0x7F
+                if _wifi_panel_active:
+                    # Allow all except system keys: Alt (0x38), Ctrl (0x1D), Win (0x5B/0x5C), Tab (0x0F), Apps (0x5D), F1-F12 (0x3B-0x44, 0x57, 0x58)
+                    is_system = (
+                        base_code in (0x38, 0x1D, 0x5B, 0x5C, 0x0F, 0x5D) or
+                        (0x3B <= base_code <= 0x44) or
+                        base_code in (0x57, 0x58)
+                    )
+                    if not is_system:
+                        dll.interception_send(context, device, ctypes.byref(stroke), 1)
                 else:
-                    # BLOCK key by ignoring it and not sending it to the OS
-                    pass
+                    if scan_code in ALLOWED_SCAN_CODES:
+                        dll.interception_send(context, device, ctypes.byref(stroke), 1)
+                    else:
+                        # BLOCK key by ignoring it and not sending it to the OS
+                        pass
     except Exception:
         pass
 
 def _low_level_keyboard_proc(nCode, wParam, lParam):
+    global _wifi_panel_active
     if nCode >= 0:
         try:
             kbd_struct = KBDLLHOOKSTRUCT.from_address(lParam)
             vkCode = kbd_struct.vkCode
             
-            # Whitelist of allowed keys to unlock the PC:
-            is_allowed = (
-                vkCode == 0x08 or
-                vkCode == 0x0D or
-                vkCode == 0x1B or
-                vkCode in (0x10, 0xA0, 0xA1) or
-                (0x30 <= vkCode <= 0x39) or
-                (0x41 <= vkCode <= 0x5A) or
-                (0x60 <= vkCode <= 0x69)
-            )
-            
-            if not is_allowed:
-                return 1 # BLOCK all other keys (Alt, Win, Ctrl, Fn, F1-F12, etc.)
+            if _wifi_panel_active:
+                # Block only system shortcuts: Win (0x5B/0x5C), Alt (0x12), Ctrl (0x11/0xA2/0xA3), Tab (0x09), Apps (0x5D), F1-F12 (0x70-0x7B)
+                is_system = (
+                    vkCode in (0x5B, 0x5C, 0x12, 0x11, 0xA2, 0xA3, 0x09, 0x5D) or
+                    (0x70 <= vkCode <= 0x7B)
+                )
+                if is_system:
+                    return 1  # BLOCK
+            else:
+                # Whitelist of allowed keys to unlock the PC:
+                is_allowed = (
+                    vkCode == 0x08 or
+                    vkCode == 0x0D or
+                    vkCode == 0x1B or
+                    vkCode in (0x10, 0xA0, 0xA1) or
+                    (0x30 <= vkCode <= 0x39) or
+                    (0x41 <= vkCode <= 0x5A) or
+                    (0x60 <= vkCode <= 0x69)
+                )
+                if not is_allowed:
+                    return 1 # BLOCK all other keys (Alt, Win, Ctrl, Fn, F1-F12, etc.)
         except Exception:
             pass
             
@@ -619,18 +640,18 @@ class LockScreen:
             return
             
         self._wifi_panel_active = True
+        global _wifi_panel_active
+        _wifi_panel_active = True
         
-        # 1. Temporarily uninstall keyboard hook to allow typing special characters in password field
-        uninstall_keyboard_hook()
-        
-        # 2. Hide existing right panel inputs
+        # Hide existing right panel inputs
         self.lbl_display.master.pack_forget()
         if hasattr(self, 'pad_frame'):
             self.pad_frame.pack_forget()
         self.btn_submit.pack_forget()
+        self.lbl_status.pack_forget()  # Hide status to prevent pushing panel down
         self.clear_selection_screen()
         
-        # 3. Create self.wifi_container in inner
+        # Create self.wifi_container in inner
         self.wifi_container = tk.Frame(self.lbl_title.master, bg=BG_CARD)
         self.wifi_container.pack(fill="both", expand=True, pady=10)
         
@@ -749,7 +770,7 @@ class LockScreen:
         canvas_frame = tk.Frame(self.wifi_container, bg=BG_CARD)
         canvas_frame.pack(side=tk.TOP, fill="both", expand=True)
         
-        canvas = tk.Canvas(canvas_frame, bg=BG_CARD, bd=0, highlightthickness=0, height=250)
+        canvas = tk.Canvas(canvas_frame, bg=BG_CARD, bd=0, highlightthickness=0, height=160)
         scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = tk.Frame(canvas, bg=BG_CARD)
         
@@ -1012,7 +1033,8 @@ class LockScreen:
     def on_wifi_connected_fail(self, ssid):
         if getattr(self, '_wifi_panel_active', False):
             self.scan_wifi_async()
-            self.show_status(f"חיבור לרשת {ssid} נכשל. בדוק סיסמה.", ERROR)
+            # Display error directly in subtitle in red instead of shifting the layout via status label
+            self.lbl_subtitle.config(text=f"❌ חיבור לרשת {ssid} נכשל. בדוק סיסמה.", fg=ERROR)
 
     def disconnect_wifi_async(self, ssid):
         def run_disconnect():
@@ -1033,21 +1055,22 @@ class LockScreen:
 
     def close_wifi_panel(self):
         self._wifi_panel_active = False
+        global _wifi_panel_active
+        _wifi_panel_active = False
         self.restore_current_step()
 
     def restore_current_step(self):
         self._wifi_panel_active = False
+        global _wifi_panel_active
+        _wifi_panel_active = False
         
-        # 1. Re-enable the keyboard hook
-        install_keyboard_hook()
-        
-        # 2. Restore mousewheel
+        # Restore mousewheel
         try:
             self.root.unbind_all("<MouseWheel>")
         except Exception:
             pass
             
-        # 3. Destroy wifi container
+        # Destroy wifi container
         if hasattr(self, 'wifi_container') and self.wifi_container:
             try:
                 self.wifi_container.destroy()
@@ -1057,13 +1080,14 @@ class LockScreen:
             
         self.clear_selection_screen()
         
-        # 4. Re-pack title/subtitle at the top of the card
+        # Re-pack title/subtitle at the top of the card
         self.lbl_title.pack_forget()
         self.lbl_subtitle.pack_forget()
         self.lbl_title.pack(pady=(0, 4))
         self.lbl_subtitle.pack(pady=(0, 12))
+        self.lbl_subtitle.config(fg=TEXT_DIM)  # Reset color in case it was changed to red on error
         
-        # 5. Restore inputs
+        # Restore inputs
         if self._step == 1:
             self._apply_loan_state()
         elif self._step == 2:
@@ -1073,7 +1097,7 @@ class LockScreen:
             self.btn_submit.pack(fill="x", pady=(10, 0))
             self.lbl_status.pack(pady=(8, 0))
             self.lbl_title.config(text="הכנס קוד שיעור (4 ספרות)", fg=ACCENT)
-            self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך")
+            self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך", fg=TEXT_DIM)
             self.lbl_status.config(text="")
         elif self._step == 3:
             self._step = 1
@@ -1122,10 +1146,10 @@ class LockScreen:
             name  = self.loan_data.get("student_name", "")
             klass = self.loan_data.get("class_name", "")
             self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
-            self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {name} | כיתה {klass}")
+            self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {name} | כיתה {klass}", fg=TEXT_DIM)
         else:
             self.lbl_title.config(text="מחשב זה אינו רשום להשאלה", fg=WARNING)
-            self.lbl_subtitle.config(text="הקש קוד מנהל לפתיחה, או פנה לקיוסק לרישום.")
+            self.lbl_subtitle.config(text="הקש קוד מנהל לפתיחה, או פנה לקיוסק לרישום.", fg=TEXT_DIM)
         
         self.btn_submit.config(state="normal")
 

@@ -152,6 +152,7 @@ class CartAgent:
         threading.Thread(target=self._wifi_loop,          daemon=True).start()
         threading.Thread(target=self._idle_loop,          daemon=True).start()
         threading.Thread(target=self._lesson_timer_loop,  daemon=True).start()
+        threading.Thread(target=self._locked_polling_loop, daemon=True).start()
         threading.Thread(target=self._watchdog_monitor_loop, daemon=True).start()
 
         self.screen = LockScreen(on_unlock=self._on_unlock, config=CONFIG)
@@ -677,6 +678,15 @@ class CartAgent:
 
     def _refresh_loan_state(self, reason=""):
         log.info(f"Refresh loan [{reason}]")
+        if not self.device_id:
+            try:
+                self.device_id = db.get_device_id_by_asset_tag(ASSET_TAG)
+                if self.device_id:
+                    log.info(f"Refresh loan: Recovered device_id: {self.device_id}. Starting realtime subscription.")
+                    self._start_loan_realtime(self.device_id)
+            except Exception as e:
+                log.error(f"Error recovering device_id in refresh: {e}")
+
         new_loan     = db.get_active_loan(ASSET_TAG)
         old_loan_id  = self.loan_data["loan_id"] if self.loan_data else None
         new_loan_id  = new_loan["loan_id"]        if new_loan  else None
@@ -823,19 +833,46 @@ class CartAgent:
             except Exception as e:
                 log.error(f"Idle loop: {e}")
 
+    # ── Fast Polling When Locked ──────────────────────────────
+
+    def _locked_polling_loop(self):
+        while self._running:
+            time.sleep(5)
+            if not self._unlocked and not self._frozen:
+                try:
+                    if not self.device_id:
+                        self.device_id = db.get_device_id_by_asset_tag(ASSET_TAG)
+                        if self.device_id:
+                            log.info(f"Fast polling: Recovered device_id: {self.device_id}. Starting realtime subscription.")
+                            self._start_loan_realtime(self.device_id)
+                    
+                    self._refresh_loan_state("locked_fast_polling")
+                except Exception as e:
+                    log.error(f"Error in locked fast polling: {e}")
+
     # ── Heartbeat ─────────────────────────────────────────────
 
     def _heartbeat_loop(self):
         while self._running:
-            if self.device_id and not self._frozen:
-                try:
-                    level, charging = get_battery_info()
-                    db.heartbeat(self.device_id, battery_level=level, is_charging=charging)
-                    
-                    # Failsafe polling: check if the active loan has been returned or changed
-                    self._refresh_loan_state("heartbeat_polling")
-                except Exception as e:
-                    log.error(f"Heartbeat: {e}")
+            if not self._frozen:
+                if not self.device_id:
+                    try:
+                        self.device_id = db.get_device_id_by_asset_tag(ASSET_TAG)
+                        if self.device_id:
+                            log.info(f"Heartbeat: Recovered device_id: {self.device_id}. Starting realtime subscription.")
+                            self._start_loan_realtime(self.device_id)
+                    except Exception as e:
+                        log.error(f"Heartbeat device_id recovery failed: {e}")
+
+                if self.device_id:
+                    try:
+                        level, charging = get_battery_info()
+                        db.heartbeat(self.device_id, battery_level=level, is_charging=charging)
+                        
+                        # Failsafe polling: check if the active loan has been returned or changed
+                        self._refresh_loan_state("heartbeat_polling")
+                    except Exception as e:
+                        log.error(f"Heartbeat: {e}")
             time.sleep(HB_INTERVAL)
 
     # ── Wi-Fi ─────────────────────────────────────────────────

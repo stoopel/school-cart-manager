@@ -347,14 +347,32 @@ class InstallerGUI:
                         raise FileNotFoundError(f"קובץ ליבה קריטי חסר במתקין: {src_name}")
                     self.log(f"[WARNING] Optional file {src_name} not found in installer root.")
 
-            # 5. Check and Install Interception Driver
+            # 5. Create empty agent.log and set permissions for all users
+            self.log("[*] Setting up write permissions for agent.log...")
+            log_file_path = os.path.join(local_dir, "agent.log")
+            try:
+                with open(log_file_path, "a") as lf:
+                    pass
+                res_acl = subprocess.run(
+                    ["icacls", log_file_path, "/grant", "*S-1-5-32-545:M"],
+                    capture_output=True, text=True, errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                if res_acl.returncode == 0:
+                    self.log("[OK] Write permissions granted for agent.log to all users.")
+                else:
+                    self.log(f"[WARNING] Failed to set permissions: {res_acl.stderr or res_acl.stdout}")
+            except Exception as ex:
+                self.log(f"[WARNING] Permissions setup failed: {ex}")
+
+            # 6. Check and Install Interception Driver
             self.log("[*] Verifying keyboard kernel protection driver status...")
             needs_reboot = self._verify_and_install_driver(local_dir)
 
-            # 6. Task Manager policies removed by admin request
+            # 7. Task Manager policies removed by admin request
             self.log("[OK] Task Manager policies bypass active.")
 
-            # 7. Configure custom user shell registry keys
+            # 8. Configure custom user shell registry keys
             self.log("[*] Registering system shell to CartAgent...")
             self._register_system_shell(local_dir)
 
@@ -366,7 +384,7 @@ class InstallerGUI:
                 subprocess.Popen([watchdog_exe], cwd=local_dir, creationflags=subprocess.CREATE_NO_WINDOW)
                 self.log("[OK] Launched CartAgent background security watchdog.")
 
-            # 8. Finished installation
+            # 9. Finished installation
             self.root.after(0, lambda: self._show_finish_dialog(needs_reboot))
 
         except Exception as e:

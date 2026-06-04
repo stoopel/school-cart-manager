@@ -29,3 +29,9 @@ dist-ssr
 .env.production
 
 .vercel
+
+# Python PyInstaller / Cache
+agent/build/
+agent/dist/
+agent/__pycache__/
+agent/*.spec

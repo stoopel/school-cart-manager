@@ -11,6 +11,8 @@ from datetime import datetime
 import ctypes
 from ctypes import wintypes
 import winreg
+import threading
+import time
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -608,47 +610,474 @@ class LockScreen:
         def _do():
             self.wifi_dot.config(fg=color)
             self.wifi_label.config(text=text, fg=color if connected else TEXT_DIM)
-            
-            # אם תלמיד בחר רשת והתחבר בהצלחה, נחזיר את חלון הנעילה לקדמת המסך מיד
-            if connected and getattr(self, '_wifi_panel_active', False):
-                self._wifi_panel_active = False
-                if getattr(self, '_wifi_timer_id', None):
-                    try: self.root.after_cancel(self._wifi_timer_id)
-                    except: pass
-                    self._wifi_timer_id = None
-                self.root.attributes("-topmost", True)
-                self.root.focus_force()
-                self.show_status("החיבור האלחוטי בוצע בהצלחה! 📶", SUCCESS)
                 
         self.root.after(0, _do)
 
     def _open_wifi_panel(self):
-        """פותח את תפריט בחירת הרשתות של Windows באמצעות קריאת Win32 טהורה / ms-availablenetworks"""
-        self._wifi_panel_active = True
-        self.root.attributes("-topmost", False)
-        try:
-            # Modern Windows 11 URI scheme
-            os.startfile("ms-availablenetworks:")
-        except Exception:
-            try:
-                subprocess.Popen(["rundll32.exe", "van.dll,RunVAN"])
-            except Exception as e:
-                self.show_status("שגיאה בפתיחת תפריט הרשתות", ERROR)
-            
-        # ביטול טיימר קודם אם קיים
-        if getattr(self, '_wifi_timer_id', None):
-            try: self.root.after_cancel(self._wifi_timer_id)
-            except: pass
-            
-        # מחזיר topmost אחרי דקה אחת לכל היותר (גיבוי בטיחותי)
-        self._wifi_timer_id = self.root.after(60000, self._restore_topmost_safety)
-
-    def _restore_topmost_safety(self):
+        """פותח את ממשק בחירת הרשתות המובנה במערכת"""
         if getattr(self, '_wifi_panel_active', False):
-            self._wifi_panel_active = False
-            self._wifi_timer_id = None
-            self.root.attributes("-topmost", True)
-            self.root.focus_force()
+            return
+            
+        self._wifi_panel_active = True
+        
+        # 1. Temporarily uninstall keyboard hook to allow typing special characters in password field
+        uninstall_keyboard_hook()
+        
+        # 2. Hide existing right panel inputs
+        self.lbl_display.master.pack_forget()
+        if hasattr(self, 'pad_frame'):
+            self.pad_frame.pack_forget()
+        self.btn_submit.pack_forget()
+        self.clear_selection_screen()
+        
+        # 3. Create self.wifi_container in inner
+        self.wifi_container = tk.Frame(self.lbl_title.master, bg=BG_CARD)
+        self.wifi_container.pack(fill="both", expand=True, pady=10)
+        
+        # 4. Trigger scan
+        self.scan_wifi_async()
+
+    def scan_wifi_async(self):
+        def run_scan():
+            self.root.after(0, lambda: self.show_wifi_status_msg("סורק רשתות... ⏳"))
+            
+            try:
+                # 1. Check current connection
+                connected_ssid = None
+                try:
+                    res_int = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                    
+                    state_connected = False
+                    for line in res_int.stdout.splitlines():
+                        line = line.strip()
+                        if ":" in line:
+                            parts = line.split(":", 1)
+                            key = parts[0].strip().lower()
+                            val = parts[1].strip()
+                            if "state" in key or "מצב" in key:
+                                if "connected" in val.lower() or "מחובר" in val:
+                                    state_connected = True
+                            elif key == "ssid":
+                                connected_ssid = val
+                    
+                    if not state_connected:
+                        connected_ssid = None
+                except Exception as e:
+                    pass
+                    
+                # 2. Scan available networks
+                encodings = ["cp862", "utf-8", "cp1255", "ansi"]
+                stdout = ""
+                for enc in encodings:
+                    try:
+                        res_net = subprocess.run(["netsh", "wlan", "show", "networks"], capture_output=True, text=True, encoding=enc, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                        if "SSID" in res_net.stdout or "רשתות" in res_net.stdout or "interfaces" in res_net.stdout:
+                            stdout = res_net.stdout
+                            break
+                    except Exception:
+                        pass
+                if not stdout:
+                    res_net = subprocess.run(["netsh", "wlan", "show", "networks"], capture_output=True, text=True, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                    stdout = res_net.stdout
+
+                networks = []
+                current_net = {}
+                
+                for line in stdout.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.lower().startswith("ssid "):
+                        if current_net and "ssid" in current_net:
+                            networks.append(current_net)
+                            current_net = {}
+                        if ":" in line:
+                            parts = line.split(":", 1)
+                            ssid_val = parts[1].strip()
+                            if ssid_val:
+                                current_net = {
+                                    "ssid": ssid_val,
+                                    "secured": True,
+                                    "connected": (ssid_val == connected_ssid)
+                                }
+                    elif current_net and ":" in line:
+                        parts = line.split(":", 1)
+                        key = parts[0].strip().lower()
+                        val = parts[1].strip()
+                        if "authentication" in key or "אימות" in key:
+                            is_open = "open" in val.lower() or "פתוח" in val or "none" in val.lower()
+                            current_net["secured"] = not is_open
+                
+                if current_net and "ssid" in current_net:
+                    networks.append(current_net)
+                
+                # Deduplicate SSIDs
+                unique_nets = {}
+                for net in networks:
+                    ssid = net["ssid"]
+                    if not ssid:
+                        continue
+                    if ssid not in unique_nets or net["connected"]:
+                        unique_nets[ssid] = net
+                networks = list(unique_nets.values())
+                
+                # Sort: Connected first, then secured, then name
+                networks.sort(key=lambda x: (not x["connected"], not x["secured"], x["ssid"].lower()))
+                
+                self.root.after(0, lambda: self.display_wifi_networks(networks))
+            except Exception as e:
+                self.root.after(0, lambda: self.show_wifi_status_msg("שגיאה בסריקת רשתות ❌"))
+                
+        threading.Thread(target=run_scan, daemon=True).start()
+
+    def display_wifi_networks(self, networks):
+        if not getattr(self, '_wifi_panel_active', False):
+            return
+            
+        # Clear container
+        for child in self.wifi_container.winfo_children():
+            child.destroy()
+            
+        self.lbl_title.config(text="📶 רשתות Wi-Fi זמינות", fg=ACCENT)
+        self.lbl_subtitle.config(text="בחר רשת כדי להתחבר:")
+        
+        # Scrollable container
+        canvas_frame = tk.Frame(self.wifi_container, bg=BG_CARD)
+        canvas_frame.pack(fill="both", expand=True)
+        
+        canvas = tk.Canvas(canvas_frame, bg=BG_CARD, bd=0, highlightthickness=0, height=250)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=BG_CARD)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=380)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Bind MouseWheel to canvas
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+        
+        if not networks:
+            lbl_empty = tk.Label(scrollable_frame, text="לא נמצאו רשתות אלחוטיות זמינות.", font=self.font_sub, bg=BG_CARD, fg=TEXT_DIM, pady=40)
+            lbl_empty.pack(fill="x")
+        else:
+            for net in networks:
+                item_frame = tk.Frame(scrollable_frame, bg=BG_INPUT, padx=12, pady=10)
+                item_frame.pack(fill="x", pady=4, padx=5)
+                
+                # Hebrew layout (Right to Left): Right side: Icon + Name
+                lbl_icon = tk.Label(item_frame, text="📶", font=self.font_sub, bg=BG_INPUT, fg=TEXT_MAIN)
+                lbl_icon.pack(side=tk.RIGHT, padx=(0, 8))
+                
+                lbl_ssid = tk.Label(item_frame, text=net["ssid"], font=self.font_small, bg=BG_INPUT, fg=TEXT_MAIN, anchor="w")
+                lbl_ssid.pack(side=tk.RIGHT, fill="x", expand=True)
+                
+                # Left side: Action Button + Lock Icon
+                if net["connected"]:
+                    btn_action = tk.Button(
+                        item_frame, text="נתק", font=self.font_small,
+                        bg="#ef4444", fg="white", activebackground="#dc2626",
+                        bd=0, padx=12, pady=4, cursor="hand2",
+                        command=lambda s=net["ssid"]: self.disconnect_wifi_async(s)
+                    )
+                    btn_action.pack(side=tk.LEFT, padx=(8, 0))
+                    
+                    lbl_connected = tk.Label(item_frame, text="מחובר ✓", font=self.font_small, bg=BG_INPUT, fg=SUCCESS)
+                    lbl_connected.pack(side=tk.LEFT, padx=(8, 0))
+                else:
+                    btn_action = tk.Button(
+                        item_frame, text="התחבר", font=self.font_small,
+                        bg=ACCENT, fg="white", activebackground=ACCENT_DARK,
+                        bd=0, padx=12, pady=4, cursor="hand2",
+                        command=lambda n=net: self.on_network_click(n)
+                    )
+                    btn_action.pack(side=tk.LEFT, padx=(8, 0))
+                    
+                    if net["secured"]:
+                        lbl_lock = tk.Label(item_frame, text="🔒", font=self.font_small, bg=BG_INPUT, fg=TEXT_DIM)
+                        lbl_lock.pack(side=tk.LEFT, padx=(8, 0))
+                        
+        # Bottom button row
+        btn_row = tk.Frame(self.wifi_container, bg=BG_CARD)
+        btn_row.pack(fill="x", pady=(15, 0))
+        
+        btn_refresh = tk.Button(
+            btn_row, text="🔄 רענן רשימה", font=self.font_small,
+            bg=BG_INPUT, fg=TEXT_MAIN, activebackground="#2a3550",
+            activeforeground=TEXT_MAIN, bd=0, padx=15, pady=8, cursor="hand2",
+            command=self.scan_wifi_async
+        )
+        btn_refresh.pack(side=tk.RIGHT, fill="x", expand=True, padx=(0, 6))
+        
+        btn_back = tk.Button(
+            btn_row, text="❌ ביטול וחזרה", font=self.font_small,
+            bg="rgba(239,68,68,0.15)", fg="#fca5a5", activebackground="#3d2121",
+            bd=0, padx=15, pady=8, cursor="hand2",
+            command=self.close_wifi_panel
+        )
+        btn_back.pack(side=tk.LEFT, fill="x", expand=True, padx=(6, 0))
+
+    def on_network_click(self, net):
+        if net["secured"]:
+            self.show_password_entry(net["ssid"])
+        else:
+            self.connect_wifi_async(net["ssid"])
+
+    def show_password_entry(self, ssid):
+        # Clear container
+        for child in self.wifi_container.winfo_children():
+            child.destroy()
+            
+        self.lbl_title.config(text=f"התחברות אל {ssid}", fg=ACCENT)
+        self.lbl_subtitle.config(text="הקלד את סיסמת הרשת")
+        
+        # Password field
+        pwd_label = tk.Label(self.wifi_container, text="סיסמת רשת (Wi-Fi Key):", font=self.font_small, bg=BG_CARD, fg=TEXT_DIM, anchor="e")
+        pwd_label.pack(fill="x", pady=(10, 2))
+        
+        pwd_frame = tk.Frame(self.wifi_container, bg=BG_INPUT, padx=10, pady=5)
+        pwd_frame.pack(fill="x", pady=(0, 15))
+        
+        self.pwd_entry = tk.Entry(
+            pwd_frame, font=self.font_sub, bg=BG_INPUT, fg=TEXT_MAIN,
+            insertbackground=TEXT_MAIN, bd=0, show="●", justify="left"
+        )
+        self.pwd_entry.pack(fill="x", expand=True)
+        self.pwd_entry.focus_set()
+        
+        # Toggle visibility button
+        show_pwd_var = tk.BooleanVar(value=False)
+        
+        def toggle_pwd():
+            if show_pwd_var.get():
+                self.pwd_entry.config(show="")
+            else:
+                self.pwd_entry.config(show="●")
+                
+        chk_show = tk.Checkbutton(
+            self.wifi_container, text="הצג סיסמה", font=self.font_small,
+            variable=show_pwd_var, command=toggle_pwd, bg=BG_CARD, fg=TEXT_DIM,
+            selectcolor=BG_INPUT, activebackground=BG_CARD, activeforeground=TEXT_MAIN,
+            bd=0, highlightthickness=0
+        )
+        chk_show.pack(anchor="w", pady=(0, 15))
+        
+        # Action buttons
+        btn_row = tk.Frame(self.wifi_container, bg=BG_CARD)
+        btn_row.pack(fill="x", pady=(10, 0))
+        
+        btn_connect = tk.Button(
+            btn_row, text="✔ התחבר", font=self.font_sub,
+            bg=SUCCESS, fg="white", activebackground="#16a34a",
+            bd=0, padx=15, pady=8, cursor="hand2",
+            command=lambda: self.connect_wifi_async(ssid, self.pwd_entry.get())
+        )
+        btn_connect.pack(side=tk.RIGHT, fill="x", expand=True, padx=(0, 6))
+        
+        btn_cancel = tk.Button(
+            btn_row, text="❌ ביטול", font=self.font_sub,
+            bg=BG_INPUT, fg=TEXT_MAIN, activebackground="#2a3550",
+            bd=0, padx=15, pady=8, cursor="hand2",
+            command=self.scan_wifi_async
+        )
+        btn_cancel.pack(side=tk.LEFT, fill="x", expand=True, padx=(6, 0))
+        
+        # Binds
+        self.pwd_entry.bind("<Return>", lambda e: self.connect_wifi_async(ssid, self.pwd_entry.get()))
+        self.pwd_entry.bind("<Escape>", lambda e: self.scan_wifi_async())
+
+    def connect_wifi_async(self, ssid, password=None):
+        def run_connect():
+            self.root.after(0, lambda: self.show_wifi_status_msg(f"מתחבר אל {ssid}... ⏳"))
+            
+            try:
+                hex_ssid = ssid.encode('utf-8').hex()
+                if password:
+                    xml_content = f"""<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+	<name>{ssid}</name>
+	<SSIDConfig>
+		<SSID>
+			<hex>{hex_ssid}</hex>
+			<name>{ssid}</name>
+		</SSID>
+	</SSIDConfig>
+	<connectionType>ESS</connectionType>
+	<connectionMode>manual</connectionMode>
+	<MSM>
+		<security>
+			<authEncryption>
+				<authentication>WPA2PSK</authentication>
+				<encryption>AES</encryption>
+				<useOneX>false</useOneX>
+			</authEncryption>
+			<sharedKey>
+				<keyType>passPhrase</keyType>
+				<protected>false</protected>
+				<keyMaterial>{password}</keyMaterial>
+			</sharedKey>
+		</security>
+	</MSM>
+</WLANProfile>
+"""
+                else:
+                    xml_content = f"""<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+	<name>{ssid}</name>
+	<SSIDConfig>
+		<SSID>
+			<hex>{hex_ssid}</hex>
+			<name>{ssid}</name>
+		</SSID>
+	</SSIDConfig>
+	<connectionType>ESS</connectionType>
+	<connectionMode>manual</connectionMode>
+	<MSM>
+		<security>
+			<authEncryption>
+				<authentication>open</authentication>
+				<encryption>none</encryption>
+				<useOneX>false</useOneX>
+			</authEncryption>
+		</security>
+	</MSM>
+</WLANProfile>
+"""
+                
+                temp_dir = os.environ.get("TEMP", "C:\\Windows\\Temp")
+                if not os.path.exists(temp_dir):
+                    temp_dir = "C:\\"
+                temp_file = os.path.join(temp_dir, f"temp_wifi_{hex_ssid}.xml")
+                
+                with open(temp_file, "w", encoding="utf-8") as f:
+                    f.write(xml_content)
+                    
+                try:
+                    subprocess.run(["netsh", "wlan", "add", "profile", f"filename={temp_file}"], capture_output=True, text=True, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                finally:
+                    try:
+                        os.remove(temp_file)
+                    except Exception:
+                        pass
+                
+                subprocess.run(["netsh", "wlan", "connect", f"name={ssid}"], capture_output=True, text=True, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                
+                # Poll connection status for 10 seconds
+                success = False
+                for _ in range(10):
+                    time.sleep(1)
+                    res_int = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                    state_connected = False
+                    connected_to_requested = False
+                    for line in res_int.stdout.splitlines():
+                        line = line.strip()
+                        if ":" in line:
+                            parts = line.split(":", 1)
+                            key = parts[0].strip().lower()
+                            val = parts[1].strip()
+                            if "state" in key or "מצב" in key:
+                                if "connected" in val.lower() or "מחובר" in val:
+                                    state_connected = True
+                            elif key == "ssid" and val == ssid:
+                                connected_to_requested = True
+                    if state_connected and connected_to_requested:
+                        success = True
+                        break
+                
+                if success:
+                    self.root.after(0, lambda: self.on_wifi_connected_success(ssid))
+                else:
+                    self.root.after(0, lambda: self.on_wifi_connected_fail(ssid))
+                    
+            except Exception as e:
+                self.root.after(0, lambda: self.on_wifi_connected_fail(ssid))
+                
+        threading.Thread(target=run_connect, daemon=True).start()
+
+    def on_wifi_connected_success(self, ssid):
+        if getattr(self, '_wifi_panel_active', False):
+            self.close_wifi_panel()
+            self.show_status(f"מחובר בהצלחה אל {ssid}! 📶", SUCCESS)
+
+    def on_wifi_connected_fail(self, ssid):
+        if getattr(self, '_wifi_panel_active', False):
+            self.scan_wifi_async()
+            self.show_status(f"חיבור לרשת {ssid} נכשל. בדוק סיסמה.", ERROR)
+
+    def disconnect_wifi_async(self, ssid):
+        def run_disconnect():
+            self.root.after(0, lambda: self.show_wifi_status_msg("מתנתק... ⏳"))
+            try:
+                subprocess.run(["netsh", "wlan", "disconnect"], capture_output=True, text=True, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(["netsh", "wlan", "delete", "profile", f"name={ssid}"], capture_output=True, text=True, errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
+                time.sleep(1)
+                self.root.after(0, lambda: self.scan_wifi_async())
+            except Exception as e:
+                self.root.after(0, lambda: self.scan_wifi_async())
+                
+        threading.Thread(target=run_disconnect, daemon=True).start()
+
+    def show_wifi_status_msg(self, msg):
+        if getattr(self, '_wifi_panel_active', False):
+            self.lbl_subtitle.config(text=msg)
+
+    def close_wifi_panel(self):
+        self._wifi_panel_active = False
+        self.restore_current_step()
+
+    def restore_current_step(self):
+        self._wifi_panel_active = False
+        
+        # 1. Re-enable the keyboard hook
+        install_keyboard_hook()
+        
+        # 2. Restore mousewheel
+        try:
+            self.root.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+            
+        # 3. Destroy wifi container
+        if hasattr(self, 'wifi_container') and self.wifi_container:
+            try:
+                self.wifi_container.destroy()
+            except Exception:
+                pass
+            self.wifi_container = None
+            
+        self.clear_selection_screen()
+        
+        # 4. Re-pack title/subtitle at the top of the card
+        self.lbl_title.pack_forget()
+        self.lbl_subtitle.pack_forget()
+        self.lbl_title.pack(pady=(0, 4))
+        self.lbl_subtitle.pack(pady=(0, 12))
+        
+        # 5. Restore inputs
+        if self._step == 1:
+            self._apply_loan_state()
+        elif self._step == 2:
+            self.lbl_display.master.pack(fill="x", pady=(0, 12))
+            if hasattr(self, 'pad_frame'):
+                self.pad_frame.pack()
+            self.btn_submit.pack(fill="x", pady=(10, 0))
+            self.lbl_status.pack(pady=(8, 0))
+            self.lbl_title.config(text="הכנס קוד שיעור (4 ספרות)", fg=ACCENT)
+            self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך")
+            self.lbl_status.config(text="")
+        elif self._step == 3:
+            self._step = 1
+            self._apply_loan_state()
+        elif self._step == 4:
+            self.show_teacher_locked("המורה הפסיק את השיעור זמנית. הקשב למורה. ⏸️")
 
     # ── Public API ────────────────────────────────────────────
 
@@ -669,6 +1098,12 @@ class LockScreen:
         self.lbl_timer.config(text="")
         self.lbl_timer_label.config(text="")
         self._verifying = False
+        
+        # Repack title and subtitle at the top of the card
+        self.lbl_title.pack_forget()
+        self.lbl_subtitle.pack_forget()
+        self.lbl_title.pack(pady=(0, 4))
+        self.lbl_subtitle.pack(pady=(0, 12))
         
         # Ensure all widgets are visible (in case they were hidden by teacher lock or selection screen)
         self.lbl_status.pack_forget()

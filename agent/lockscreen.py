@@ -83,21 +83,43 @@ ALLOWED_SCAN_CODES = {
     0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32
 }
 
+import atexit
+import _ctypes
+
+def free_interception_dll():
+    global _interception_dll, _interception_context, _interception_running
+    if _interception_dll is not None:
+        try:
+            if _interception_context:
+                _interception_running = False
+                try:
+                    _interception_dll.interception_destroy_context(_interception_context)
+                except Exception:
+                    pass
+                _interception_context = None
+            
+            _ctypes.FreeLibrary(_interception_dll._handle)
+        except Exception:
+            pass
+        _interception_dll = None
+
+atexit.register(free_interception_dll)
+
 def load_interception():
     global _interception_dll
     if _interception_dll is not None:
         return _interception_dll
     
     import os, sys
-    paths = []
-    if getattr(sys, 'frozen', False):
-        paths.append(os.path.join(sys._MEIPASS, "interception.dll"))
-    paths.extend([
-        "interception.dll",
+    # Priority paths: Permanent system folders first to avoid locking temp dir
+    paths = [
         r"C:\Program Files\CartAgent\interception.dll",
         r"C:\Program Files\Veyon\interception.dll",
         r"C:\Program Files\Veyon\3rdparty\interception\interception.dll"
-    ])
+    ]
+    if getattr(sys, 'frozen', False):
+        paths.append(os.path.join(sys._MEIPASS, "interception.dll"))
+    paths.append("interception.dll")
     
     for path in paths:
         if os.path.exists(path):
@@ -234,15 +256,10 @@ def uninstall_keyboard_hook():
     global _keyboard_hook, _callback_ptr
     global _interception_context, _interception_thread, _interception_running
     
-    # 1. Stop Interception driver context
-    if _interception_context:
-        try:
-            _interception_running = False
-            _interception_dll.interception_destroy_context(_interception_context)
-        except Exception:
-            pass
-        _interception_context = None
-        _interception_thread = None
+    # 1. Stop Interception driver context and unload DLL
+    free_interception_dll()
+    _interception_context = None
+    _interception_thread = None
         
     # 2. Stop fallback hook
     if _keyboard_hook is not None:

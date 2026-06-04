@@ -9,18 +9,18 @@ from datetime import datetime, timezone
 from lockscreen import LockScreen, start_explorer
 import supabase_client as db
 
-# ── Logging ───────────────────────────────────────────────────
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.log")
-logging.basicConfig(filename=LOG_PATH, level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s",
-                    datefmt="%Y-%m-%d %H:%M:%S")
-log = logging.getLogger(__name__)
-
-# ── Config ────────────────────────────────────────────────────
+# ── Config & Directory Setup ──────────────────────────────────
 if getattr(sys, 'frozen', False):
     _DIR = os.path.dirname(sys.executable)
 else:
     _DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ── Logging ───────────────────────────────────────────────────
+LOG_PATH = os.path.join(_DIR, "agent.log")
+logging.basicConfig(filename=LOG_PATH, level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
+log = logging.getLogger(__name__)
 
 CONFIG = db.load_obfuscated_config(os.path.join(_DIR, "config.json"))
 

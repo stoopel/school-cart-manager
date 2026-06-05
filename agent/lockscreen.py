@@ -167,7 +167,7 @@ def load_interception():
     return None
 
 def _interception_thread_proc():
-    global _interception_context, _interception_running
+    global _interception_context, _interception_running, _wifi_panel_active
     try:
         dll = _interception_dll
         context = _interception_context
@@ -380,6 +380,161 @@ def remove_tray_icon():
             pass
 
 
+class LessonWidget(tk.Toplevel):
+    def __init__(self, parent_root, subject, teacher_name, end_time_str, on_disconnect):
+        super().__init__(parent_root)
+        self.parent_root = parent_root
+        self.subject = subject
+        self.teacher_name = teacher_name
+        self.on_disconnect = on_disconnect
+        
+        self.title("Lesson Widget")
+        self.overrideredirect(True)
+        self.attributes("-alpha", 0.75)
+        self.attributes("-topmost", True)
+        self.configure(bg=BG_CARD)
+        
+        # Don't show in taskbar
+        self.wm_attributes("-toolwindow", True)
+        
+        # Dimensions & position
+        self.width = 280
+        self.height = 65
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Place initially at bottom-right (above standard taskbar height)
+        self.x = screen_width - self.width - 25
+        self.y = screen_height - self.height - 60
+        self.geometry(f"{self.width}x{self.height}+{self.x}+{self.y}")
+        
+        # Outer border frame
+        self.border_frame = tk.Frame(self, bg=BORDER, bd=1)
+        self.border_frame.pack(fill="both", expand=True)
+        
+        self.main_frame = tk.Frame(self.border_frame, bg=BG_CARD)
+        self.main_frame.pack(fill="both", expand=True, padx=1, pady=1)
+        
+        left_box = tk.Frame(self.main_frame, bg=BG_CARD)
+        left_box.pack(side=tk.LEFT, fill="y", padx=10)
+        
+        # Small disconnect button in Hebrew: "התנתק"
+        self.btn_disconnect = tk.Button(
+            left_box, text="התנתק", font=tkfont.Font(family="Segoe UI", size=10, weight="bold"),
+            bg=ERROR, fg="white", activebackground="#dc2626", activeforeground="white",
+            bd=0, padx=8, pady=4, cursor="hand2", command=self._confirm_disconnect,
+            relief="flat"
+        )
+        self.btn_disconnect.pack(expand=True)
+        
+        # Info container
+        right_box = tk.Frame(self.main_frame, bg=BG_CARD)
+        right_box.pack(side=tk.RIGHT, fill="both", expand=True, padx=(0, 12), pady=8)
+        
+        font_sub = tkfont.Font(family="Segoe UI", size=11, weight="bold")
+        font_timer = tkfont.Font(family="Segoe UI", size=9)
+        
+        teacher_txt = f" | {self.teacher_name}" if self.teacher_name else ""
+        self.lbl_info = tk.Label(
+            right_box, text=f"{self.subject}{teacher_txt}",
+            font=font_sub, bg=BG_CARD, fg=TEXT_MAIN, anchor="e", justify="right"
+        )
+        self.lbl_info.pack(fill="x", anchor="e")
+        
+        self.lbl_timer = tk.Label(
+            right_box, text="מחשב את הזמן...",
+            font=font_timer, bg=BG_CARD, fg=TEXT_DIM, anchor="e", justify="right"
+        )
+        self.lbl_timer.pack(fill="x", anchor="e")
+        
+        # Draggable bindings (using absolute mouse coordinates to prevent jitter)
+        for w in (self, self.border_frame, self.main_frame, left_box, right_box, self.lbl_info, self.lbl_timer):
+            w.bind("<Button-1>", self.start_drag)
+            w.bind("<B1-Motion>", self.drag)
+            
+    def start_drag(self, event):
+        self.drag_x = event.x_root - self.winfo_x()
+        self.drag_y = event.y_root - self.winfo_y()
+        
+    def drag(self, event):
+        x = event.x_root - self.drag_x
+        y = event.y_root - self.drag_y
+        self.geometry(f"+{x}+{y}")
+
+    def _confirm_disconnect(self):
+        confirm_win = tk.Toplevel(self)
+        confirm_win.title("התנתקות מהשיעור")
+        confirm_win.overrideredirect(True)
+        confirm_win.attributes("-topmost", True)
+        confirm_win.configure(bg=BG_CARD)
+        
+        w = 300
+        h = 135
+        # Center relative to parent widget
+        x = self.winfo_x() - (w - self.width) // 2
+        y = self.winfo_y() - h - 10
+        if x < 0: x = 10
+        if y < 0: y = self.winfo_y() + self.height + 10
+        confirm_win.geometry(f"{w}x{h}+{x}+{y}")
+        
+        border = tk.Frame(confirm_win, bg=BORDER, bd=1)
+        border.pack(fill="both", expand=True)
+        
+        main = tk.Frame(border, bg=BG_CARD, padx=15, pady=12)
+        main.pack(fill="both", expand=True, padx=1, pady=1)
+        
+        font_bold = tkfont.Font(family="Segoe UI", size=11, weight="bold")
+        font_regular = tkfont.Font(family="Segoe UI", size=10)
+        
+        tk.Label(
+            main, text="האם אתה בטוח שברצונך להתנתק?",
+            font=font_bold, bg=BG_CARD, fg=TEXT_MAIN, justify="center"
+        ).pack(fill="x", pady=(0, 6))
+        
+        tk.Label(
+            main, text="התנתקות תנעל את המחשב ותסיר אותך מהשיעור.",
+            font=font_regular, bg=BG_CARD, fg=TEXT_DIM, justify="center"
+        ).pack(fill="x", pady=(0, 15))
+        
+        btn_row = tk.Frame(main, bg=BG_CARD)
+        btn_row.pack(fill="x")
+        
+        def do_yes():
+            confirm_win.destroy()
+            if self.on_disconnect:
+                self.on_disconnect()
+                
+        def do_no():
+            confirm_win.destroy()
+            
+        btn_yes = tk.Button(
+            btn_row, text="כן, התנתק", font=font_regular,
+            bg=ERROR, fg="white", activebackground="#dc2626", activeforeground="white",
+            bd=0, padx=12, pady=5, cursor="hand2", command=do_yes
+        )
+        btn_yes.pack(side=tk.LEFT, fill="x", expand=True, padx=(0, 5))
+        
+        btn_no = tk.Button(
+            btn_row, text="ביטול", font=font_regular,
+            bg=BG_INPUT, fg=TEXT_MAIN, activebackground="#2a3550", activeforeground=TEXT_MAIN,
+            bd=0, padx=12, pady=5, cursor="hand2", command=do_no
+        )
+        btn_no.pack(side=tk.RIGHT, fill="x", expand=True, padx=(5, 0))
+
+    def update_timer(self, remaining_seconds):
+        if remaining_seconds is None or remaining_seconds < 0:
+            self.lbl_timer.config(text="")
+            return
+            
+        if remaining_seconds > 180:
+            mins = int((remaining_seconds + 59) // 60)
+            self.lbl_timer.config(text=f"עוד {mins} דקות")
+        else:
+            m = int(remaining_seconds // 60)
+            s = int(remaining_seconds % 60)
+            self.lbl_timer.config(text=f"עוד {m}:{s:02d} דקות")
+
+
 class LockScreen:
     def __init__(self, on_unlock, config: dict):
         self.on_unlock = on_unlock
@@ -394,6 +549,8 @@ class LockScreen:
         self._wifi_panel_active = False
         self._wifi_timer_id = None
         self._verifying = False
+        self.lesson_widget = None
+        self._on_disconnect_clicked = None
 
         self.root = tk.Tk()
         self._setup_window()
@@ -575,7 +732,7 @@ class LockScreen:
     # ── Numpad logic ──────────────────────────────────────────
 
     def _on_digit(self, ch):
-        if getattr(self, "_verifying", False):
+        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
             return
         max_len = 4 if self._step == 2 else 9
         if len(self.entered_id) < max_len:
@@ -584,20 +741,20 @@ class LockScreen:
             self.lbl_display.config(text=display)
 
     def _on_backspace(self):
-        if getattr(self, "_verifying", False):
+        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
             return
         self.entered_id = self.entered_id[:-1]
         display = self.entered_id if self._step == 2 else "●" * len(self.entered_id)
         self.lbl_display.config(text=display)
 
     def _on_key(self, event):
-        if getattr(self, "_verifying", False):
+        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
             return
         if event.char.isalnum():
             self._on_digit(event.char)
 
     def _on_submit(self):
-        if getattr(self, "_verifying", False):
+        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
             return
         if not self.entered_id:
             return
@@ -611,7 +768,7 @@ class LockScreen:
 
     def _on_back(self):
         """ESC בשלב 2 – חזרה לשלב 1"""
-        if getattr(self, "_verifying", False):
+        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
             return
         if self._step == 2:
             self._step = 1
@@ -635,13 +792,15 @@ class LockScreen:
         self.root.after(0, _do)
 
     def _open_wifi_panel(self):
-        """פותח את ממשק בחירת הרשתות המובנה במערכת"""
+        """פותח או סוגר את ממשק בחירת הרשתות"""
         if getattr(self, '_wifi_panel_active', False):
+            self.close_wifi_panel()
             return
             
         self._wifi_panel_active = True
         global _wifi_panel_active
         _wifi_panel_active = True
+        self.wifi_btn.config(text="❌  סגור רשימה")
         
         # Hide existing right panel inputs
         self.lbl_display.master.pack_forget()
@@ -762,9 +921,9 @@ class LockScreen:
         self.lbl_title.config(text="📶 רשתות Wi-Fi זמינות", fg=ACCENT)
         self.lbl_subtitle.config(text="בחר רשת כדי להתחבר:")
         
-        # Bottom button row (pack FIRST at the bottom to prevent clipping)
+        # Top button row (pack FIRST at the top to prevent clipping/pushing off)
         btn_row = tk.Frame(self.wifi_container, bg=BG_CARD)
-        btn_row.pack(side=tk.BOTTOM, fill="x", pady=(15, 0))
+        btn_row.pack(side=tk.TOP, fill="x", pady=(0, 15))
 
         # Scrollable container
         canvas_frame = tk.Frame(self.wifi_container, bg=BG_CARD)
@@ -1057,6 +1216,7 @@ class LockScreen:
         self._wifi_panel_active = False
         global _wifi_panel_active
         _wifi_panel_active = False
+        self.wifi_btn.config(text="📶  בחר רשת Wi-Fi")
         self.restore_current_step()
 
     def restore_current_step(self):
@@ -1220,6 +1380,8 @@ class LockScreen:
 
     def unlock(self, student_name: str):
         self._unlocked = True
+        self._step = 1
+        self.clear_selection_screen()
         self.show_status(f"ברוך הבא, {student_name}! 🎉", SUCCESS)
         self.root.after(2000, self._do_unlock)
 
@@ -1237,6 +1399,7 @@ class LockScreen:
         self._unlocked = False
         self.entered_id = ""
         self._verifying = False
+        self.hide_lesson_widget()
         def _do():
             install_keyboard_hook()
             set_task_manager_enabled(False)
@@ -1287,6 +1450,7 @@ class LockScreen:
         self.root.mainloop()
 
     def destroy(self):
+        self.hide_lesson_widget()
         remove_tray_icon()
         uninstall_keyboard_hook()
         set_task_manager_enabled(True)
@@ -1416,4 +1580,31 @@ class LockScreen:
             self.lbl_display.config(text="")
             self.lbl_status.config(text="")
         self.root.after(0, _do)
+
+    def set_disconnect_callback(self, cb):
+        self._on_disconnect_clicked = cb
+
+    def show_lesson_widget(self, subject, teacher_name, end_time_str):
+        self.root.after(0, lambda: self._show_lesson_widget_inner(subject, teacher_name, end_time_str))
+
+    def _show_lesson_widget_inner(self, subject, teacher_name, end_time_str):
+        self.hide_lesson_widget()
+        self.lesson_widget = LessonWidget(
+            self.root, subject, teacher_name, end_time_str, self._on_disconnect_clicked
+        )
+
+    def hide_lesson_widget(self):
+        if self.lesson_widget:
+            try:
+                self.lesson_widget.destroy()
+            except Exception:
+                pass
+            self.lesson_widget = None
+
+    def update_lesson_widget_timer(self, remaining_seconds):
+        if self.lesson_widget:
+            try:
+                self.lesson_widget.update_timer(remaining_seconds)
+            except Exception:
+                pass
 

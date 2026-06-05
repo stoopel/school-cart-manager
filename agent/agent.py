@@ -144,10 +144,18 @@ class CartAgent:
         self.device_id = db.get_device_id_by_asset_tag(ASSET_TAG)
         self._refresh_loan_state("startup")
 
+        # Initialize screen first to ensure self.screen is fully defined before threads start
+        self.screen = LockScreen(on_unlock=self._on_unlock, config=CONFIG)
+        self.screen.set_verify_callback(self._verify_step1_id)
+        self.screen.set_lesson_verify_callback(self._verify_step2_lesson)
+        self.screen.set_disconnect_callback(self._on_student_disconnect)
+        self.screen.set_loan_info(self.loan_data)
+
         # Start Realtime subscription for loans
         if self.device_id:
             self._start_loan_realtime(self.device_id)
 
+        # Start background threads now that self.screen is fully initialized
         threading.Thread(target=self._heartbeat_loop,     daemon=True).start()
         threading.Thread(target=self._wifi_loop,          daemon=True).start()
         threading.Thread(target=self._idle_loop,          daemon=True).start()
@@ -155,10 +163,7 @@ class CartAgent:
         threading.Thread(target=self._locked_polling_loop, daemon=True).start()
         threading.Thread(target=self._watchdog_monitor_loop, daemon=True).start()
 
-        self.screen = LockScreen(on_unlock=self._on_unlock, config=CONFIG)
-        self.screen.set_verify_callback(self._verify_step1_id)
-        self.screen.set_lesson_verify_callback(self._verify_step2_lesson)
-        self.screen.set_loan_info(self.loan_data)
+        # Run the blocking Tkinter main loop
         self.screen.run()
 
     # ── Step 1: אימות ת.ז. ───────────────────────────────────
@@ -445,9 +450,65 @@ class CartAgent:
     def _do_unlock(self, name: str):
         self._unlocked = True
         self.screen.unlock(name)
+        if not self._teacher_bypass and self._lesson_data:
+            self.screen.show_lesson_widget(
+                self._lesson_data.get('subject', 'שיעור'),
+                self._lesson_data.get('teacher_name', ''),
+                self._lesson_data.get('end_time', '')
+            )
 
     def _on_unlock(self):
         log.info("Device unlocked.")
+
+    def _on_student_disconnect(self):
+        log.info("Student requested disconnection from lesson via floating widget.")
+        self._unlocked = False
+        
+        # Relock screen immediately to secure the PC
+        if self.screen:
+            self.screen.hide_lesson_widget()
+            self.screen.relock("מתנתק מהשיעור... ⏳")
+            
+        # Run DB updates in a background thread to prevent GUI lag
+        threading.Thread(target=self._async_student_disconnect, daemon=True).start()
+
+    def _async_student_disconnect(self):
+        try:
+            if not self.loan_data:
+                log.warning("Disconnection requested but no active loan found locally.")
+                return
+
+            loan_id = self.loan_data["loan_id"]
+            device_id = self.loan_data["device_id"]
+            student_id = self.loan_data["student_id"]
+            lesson_id = self._lesson_data["lesson_id"] if self._lesson_data else None
+
+            log.info(f"Disconnecting student_id={student_id} from lesson_id={lesson_id}")
+            
+            # 1. Update active loan in DB: set lesson_id = NULL
+            db.clear_loan_lesson(loan_id)
+            
+            # 2. Delete participant from lesson_participants in DB
+            if lesson_id:
+                db.remove_lesson_participant(lesson_id, student_id)
+                db.log_event(device_id, loan_id, "student_disconnect", {"lesson_id": lesson_id})
+
+            # 3. Clean up local state
+            self._lesson_data = None
+            self._lesson_timer = None
+            if self._rt_lesson:
+                self._rt_lesson.stop()
+                self._rt_lesson = None
+
+            # 4. Update UI lock message to show successful disconnection
+            if self.screen:
+                self.screen.root.after(0, lambda: self.screen.show_status("התנתקת מהשיעור בהצלחה.", "#22c55e"))
+                # Also restore the standard lesson code prompt
+                self.screen.root.after(0, self.screen.show_lesson_code_prompt)
+        except Exception as e:
+            log.error(f"Error in _async_student_disconnect: {e}", exc_info=True)
+            if self.screen:
+                self.screen.root.after(0, lambda: self.screen.show_status("שגיאה בהתנתקות מהשרת. המחשב ננעל.", "#ef4444"))
 
     # ── Realtime: Loan ────────────────────────────────────────
 
@@ -591,6 +652,7 @@ class CartAgent:
             # עדכון טיימר בממשק
             if self.screen:
                 self.screen.update_lesson_timer(self._lesson_timer.format_remaining())
+                self.screen.update_lesson_widget_timer(remaining)
 
             # נעילה
             if self._lesson_timer.is_expired():
@@ -814,6 +876,12 @@ class CartAgent:
                     if self.screen: self.screen.unfreeze()
                     self._check_charging_after_wake()
                     self._refresh_loan_state(f"wake {elapsed_time:.0f}s")
+                    if self._unlocked and not self._teacher_bypass and self._lesson_data:
+                        self.screen.show_lesson_widget(
+                            self._lesson_data.get('subject', 'שיעור'),
+                            self._lesson_data.get('teacher_name', ''),
+                            self._lesson_data.get('end_time', '')
+                        )
                 elif elapsed_time > 60.0:
                     log.info(f"CPU Lag detected (time gap={elapsed_time:.0f}s, mono gap={elapsed_mono:.1f}s). Skipping sleep wake checks.")
 
@@ -826,7 +894,9 @@ class CartAgent:
                     level, _ = get_battery_info()
                     if level and self.device_id:
                         db.save_battery_before_sleep(self.device_id, level)
-                    if self.screen: self.screen.freeze()
+                    if self.screen:
+                        self.screen.hide_lesson_widget()
+                        self.screen.freeze()
                     if self._rt_lesson: self._rt_lesson.stop(); self._rt_lesson = None
                     send_to_sleep()
 
@@ -837,7 +907,7 @@ class CartAgent:
 
     def _locked_polling_loop(self):
         while self._running:
-            time.sleep(5)
+            time.sleep(30)
             if not self._unlocked and not self._frozen:
                 try:
                     if not self.device_id:
@@ -885,6 +955,12 @@ class CartAgent:
                 if connected != last:
                     last = connected
                     log.info(f"Wi-Fi: {'on' if connected else 'off'}")
+                    if connected:
+                        # Wi-Fi restored -> trigger immediate reconnect on subscriptions
+                        if self._rt_loan:
+                            self._rt_loan.trigger_reconnect()
+                        if self._rt_lesson:
+                            self._rt_lesson.trigger_reconnect()
                 if self.screen:
                     self.screen.update_wifi_status(connected)
             except Exception as e:

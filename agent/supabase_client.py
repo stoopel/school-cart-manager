@@ -70,6 +70,17 @@ def _patch(path, data, params=None):
     except Exception as e:
         log.error(f"PATCH {path}: {e}"); return None
 
+def _delete(path, params=None):
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/{path}",
+                            headers=HEADERS, params=params, timeout=10, verify=False)
+        r.raise_for_status()
+        if r.status_code == 204 or not r.text.strip():
+            return True
+        return r.json()
+    except Exception as e:
+        log.error(f"DELETE {path}: {e}"); return None
+
 def _rpc(fn, params):
     try:
         r = requests.post(f"{SUPABASE_URL}/rest/v1/rpc/{fn}",
@@ -89,30 +100,47 @@ def get_device_id_by_asset_tag(asset_tag):
     return rows[0]["id"] if rows else None
 
 def get_active_loan(asset_tag):
-    devs = _get("devices", {"asset_tag": f"eq.{asset_tag}", "select": "id,device_number,cart_id"})
-    if not devs: return None
-    did = devs[0]["id"]
-    loans = _get("device_loans", {"device_id": f"eq.{did}", "status": "eq.active",
-                                   "checkin_at": "is.null",
-                                   "select": "id,student_id,checkout_at,digital_login_at,lesson_id"})
-    if not loans: return None
+    params = {
+        "asset_tag": f"eq.{asset_tag}",
+        "select": "id,device_number,cart_id,carts(enable_charge_tracking),device_loans(id,student_id,checkout_at,digital_login_at,lesson_id,students(id,national_id,name,class_name,grade,charge_strikes))",
+        "device_loans.status": "eq.active",
+        "device_loans.checkin_at": "is.null"
+    }
+    devs = _get("devices", params)
+    if not devs:
+        return None
+    
+    dev = devs[0]
+    loans = dev.get("device_loans")
+    if not loans or not isinstance(loans, list):
+        return None
+        
     loan = loans[0]
-    stu = _get("students", {"id": f"eq.{loan['student_id']}",
-                             "select": "id,national_id,name,class_name,grade,charge_strikes"})
-    if not stu: return None
-    s = stu[0]
+    students_data = loan.get("students")
+    if not students_data:
+        return None
+        
+    s = None
+    if isinstance(students_data, dict):
+        s = students_data
+    elif isinstance(students_data, list) and students_data:
+        s = students_data[0]
+        
+    if not s:
+        return None
 
     # Fetch per-cart charge tracking setting
     enable_tracking = True
-    if devs[0].get("cart_id"):
-        cart_opts = _get("carts", {"id": f"eq.{devs[0]['cart_id']}", "select": "enable_charge_tracking"})
-        if cart_opts:
-            enable_tracking = cart_opts[0].get("enable_charge_tracking", True)
+    carts_data = dev.get("carts")
+    if isinstance(carts_data, dict):
+        enable_tracking = carts_data.get("enable_charge_tracking", True)
+    elif isinstance(carts_data, list) and carts_data:
+        enable_tracking = carts_data[0].get("enable_charge_tracking", True)
 
     return {
         "loan_id":       loan["id"],
-        "device_id":     did,
-        "device_number": devs[0]["device_number"],
+        "device_id":     dev["id"],
+        "device_number": dev.get("device_number"),
         "checkout_at":   loan["checkout_at"],
         "lesson_id":     loan.get("lesson_id"),
         "student_id":    s["id"],
@@ -239,6 +267,16 @@ def join_lesson(lesson_id, loan_id, device_id, student_id) -> bool:
         _patch("device_loans", {"lesson_id": lesson_id}, {"id": f"eq.{loan_id}"})
     return bool(result)
 
+def remove_lesson_participant(lesson_id, student_id) -> bool:
+    """מחק תלמיד מטבלת משתתפי השיעור"""
+    result = _delete("lesson_participants", {"lesson_id": f"eq.{lesson_id}", "student_id": f"eq.{student_id}"})
+    return bool(result)
+
+def clear_loan_lesson(loan_id) -> bool:
+    """אפס את מזהה השיעור (lesson_id) עבור השאלה פעילה"""
+    result = _patch("device_loans", {"lesson_id": None}, {"id": f"eq.{loan_id}"})
+    return bool(result)
+
 def get_lesson_status(lesson_id: str) -> dict | None:
     """בדיקה תקופתית של סטטוס שיעור (ל-polling fallback)"""
     rows = _get("lessons", {"id": f"eq.{lesson_id}",
@@ -296,9 +334,11 @@ class RealtimeSubscription:
         self._running     = False
         self._ref         = 0
         self.is_connected = False
+        self._reconnect_event = threading.Event()
 
     def start(self):
         self._running = True
+        self._reconnect_event.clear()
         threading.Thread(target=self._run_loop, daemon=True).start()
 
     def stop(self):
@@ -307,17 +347,35 @@ class RealtimeSubscription:
         if self._ws:
             try: self._ws.close()
             except: pass
+        self._reconnect_event.set() # Wake up reconnect sleep immediately
+
+    def trigger_reconnect(self):
+        """מאפשר לעורר את החיבור מחדש באופן מיידי (למשל כשהאינטרנט חוזר)"""
+        log.info(f"Realtime {self.channel}: Reconnect triggered immediately")
+        self._reconnect_event.set()
 
     def _next_ref(self):
         self._ref += 1; return str(self._ref)
 
     def _run_loop(self):
+        delay = 15
         while self._running:
-            try: self._connect()
-            except Exception as e: log.error(f"Realtime {self.channel}: {e}")
+            start_time = time.time()
+            try:
+                self._connect()
+            except Exception as e:
+                log.error(f"Realtime {self.channel}: {e}")
+            
             if self._running:
-                log.info(f"Realtime {self.channel}: reconnecting in 15s")
-                time.sleep(15)
+                # If connected for more than 30 seconds, reset backoff delay
+                if time.time() - start_time > 30:
+                    delay = 15
+                else:
+                    delay = min(delay * 2, 300)
+                
+                log.info(f"Realtime {self.channel}: reconnecting in {delay}s")
+                self._reconnect_event.clear()
+                self._reconnect_event.wait(timeout=delay)
 
     def _connect(self):
         import websocket

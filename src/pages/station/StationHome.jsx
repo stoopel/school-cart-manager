@@ -375,20 +375,6 @@ export default function StationHome() {
       <div className="station-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <div className="station-school">🏫 {cart ? (cart.display_name || cart.name) : 'תחנת עגלה'}</div>
-          <button
-            onClick={handleLogoutStation}
-            style={{
-              background: 'rgba(239,68,68,0.1)', color: '#fca5a5',
-              border: 'none', borderRadius: 8, padding: '6px 12px',
-              fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
-              transition: 'all 0.2s'
-            }}
-            title="ניתוק תחנה והחזרה למסך בחירת עגלה"
-            onMouseOver={e => e.currentTarget.style.background = 'rgba(239,68,68,0.2)'}
-            onMouseOut={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
-          >
-            🔒 ניתוק עמדה
-          </button>
         </div>
         <div className="station-clock">
           <div className="station-time">{timeStr}</div>

@@ -284,17 +284,7 @@ export default function StationHome() {
   if (!isAuthorized) {
     return (
       <div className="station-root" style={{ alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <button 
-          onClick={() => navigate('/station')} 
-          style={{
-            position: 'absolute', top: 24, right: 24,
-            background: 'rgba(255,255,255,0.06)', border: '1px solid var(--station-border)',
-            color: 'var(--station-text)', borderRadius: 12, padding: '10px 20px',
-            cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600
-          }}
-        >
-          ← שינוי עגלה
-        </button>
+
 
         <div className="station-panel" style={{ maxWidth: 400, boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>

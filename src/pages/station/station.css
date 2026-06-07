@@ -20,7 +20,10 @@
 }
 
 .station-root {
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  box-sizing: border-box;
   background: var(--station-bg);
   display: flex;
   flex-direction: column;
@@ -56,13 +59,13 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px;
-  gap: 40px;
+  padding: 24px;
+  gap: 24px;
 }
 
 .station-welcome { text-align: center; }
 .station-welcome h1 {
-  font-size: 2.5rem;
+  font-size: 2.2rem;
   font-weight: 900;
   color: var(--station-text);
   margin-bottom: 8px;
@@ -81,8 +84,8 @@
 }
 
 .station-btn {
-  width: 280px;
-  height: 220px;
+  width: 250px;
+  height: 190px;
   border-radius: 24px;
   border: 2px solid transparent;
   display: flex;
@@ -141,7 +144,10 @@
    Take / Return Shared Styles
    ================================================ */
 .station-flow {
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  box-sizing: border-box;
   background: var(--station-bg);
   display: flex;
   flex-direction: column;
@@ -178,15 +184,15 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px;
-  gap: 28px;
+  padding: 24px;
+  gap: 20px;
 }
 
 .station-panel {
   background: var(--station-card);
   border: 1px solid var(--station-border);
   border-radius: 24px;
-  padding: 40px;
+  padding: 24px 32px;
   width: 100%;
   max-width: 520px;
 }
@@ -196,7 +202,7 @@
   font-weight: 800;
   color: var(--station-text);
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 16px;
 }
 
 /* ID Input */

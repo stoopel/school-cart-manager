@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Html5QrcodeScanner } from 'html5-qrcode'
+import { Html5Qrcode } from 'html5-qrcode'
 import { supabase } from '../../lib/supabase'
 
 const STEPS = { ID: 'id', SCAN: 'scan', SUCCESS: 'success', ERROR: 'error' }
@@ -93,38 +93,45 @@ export default function TakeLaptop({ cart, onDone }) {
     setStep(STEPS.SCAN)
   }
 
-  // QR Scanner init
+  // QR Scanner – מצלמה קדמית (facingMode: user) לטאבלט מורכב על קיר
   useEffect(() => {
     if (step !== STEPS.SCAN || scanMode !== 'qr') return
-    const scanner = new Html5QrcodeScanner('qr-reader-take', { fps: 10, qrbox: { width: 220, height: 220 } }, false)
-    scanner.render(onQRSuccess, () => {})
-    scannerRef.current = scanner
+    const qrCode = new Html5Qrcode('qr-reader-take')
+    scannerRef.current = qrCode
+    qrCode.start(
+      { facingMode: 'user' },
+      { fps: 10, qrbox: { width: 220, height: 220 } },
+      async (decodedText) => {
+        if (scannerRef.current) {
+          try {
+            await scannerRef.current.stop()
+          } catch (e) {
+            console.error('Error stopping scanner inside success callback:', e)
+          }
+          scannerRef.current = null
+        }
+        onQRSuccess(decodedText)
+      },
+      () => {} // שגיאות סריקה – מתעלמים
+    ).catch(err => console.error('Camera error:', err))
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.clear().catch(() => {})
+        scannerRef.current.stop().catch(() => {})
         scannerRef.current = null
       }
     }
   }, [step, scanMode])
 
   async function onQRSuccess(decodedText) {
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.clear()
-      } catch (e) {
-        console.error('Failed to clear scanner on success:', e)
-      }
-      scannerRef.current = null
-    }
     await processDevice(decodedText)
   }
 
   async function safeSetScanMode(newMode) {
     if (scanMode === 'qr' && scannerRef.current) {
       try {
-        await scannerRef.current.clear()
+        await scannerRef.current.stop()
       } catch (e) {
-        console.error('Error clearing scanner on mode switch:', e)
+        console.error('Error stopping scanner on mode switch:', e)
       }
       scannerRef.current = null
     }
@@ -134,9 +141,9 @@ export default function TakeLaptop({ cart, onDone }) {
   async function safeGoBackToId() {
     if (scanMode === 'qr' && scannerRef.current) {
       try {
-        await scannerRef.current.clear()
+        await scannerRef.current.stop()
       } catch (e) {
-        console.error('Error clearing scanner on back action:', e)
+        console.error('Error stopping scanner on back action:', e)
       }
       scannerRef.current = null
     }
@@ -203,7 +210,7 @@ export default function TakeLaptop({ cart, onDone }) {
           <input
             className="station-id-input"
             type="text"
-            inputMode="numeric"
+            inputMode="none"
             value={idValue}
             onChange={e => setIdValue(e.target.value.replace(/\D/g, '').slice(0,9))}
             placeholder="_ _ _ _ _ _ _ _ _"

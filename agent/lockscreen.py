@@ -681,6 +681,14 @@ class LockScreen:
         )
         self.wifi_btn.pack(side=tk.LEFT)
 
+        self.shutdown_btn = tk.Button(
+            wifi_row, text="🔌  כיבוי מחשב", font=self.font_small,
+            bg=BG_INPUT, fg=ERROR, activebackground="#dc2626",
+            activeforeground="white", bd=0, padx=12, pady=6,
+            cursor="hand2", relief="flat", command=self._confirm_shutdown,
+        )
+        self.shutdown_btn.pack(side=tk.LEFT, padx=(12, 0))
+
         tk.Frame(left, bg=BG).pack(expand=True)
 
         tk.Label(left, text="מערכת ניהול השאלת מחשבים",
@@ -827,6 +835,69 @@ class LockScreen:
             self.wifi_label.config(text=text, fg=color if connected else TEXT_DIM)
                 
         self.root.after(0, _do)
+
+    def _confirm_shutdown(self):
+        """פופאפ אישור לפני כיבוי המחשב"""
+        confirm_win = tk.Toplevel(self.root)
+        confirm_win.title("כיבוי המחשב")
+        confirm_win.overrideredirect(True)
+        confirm_win.attributes("-topmost", True)
+        confirm_win.configure(bg=BG_CARD)
+        
+        w = 320
+        h = 145
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width - w) // 2
+        y = (screen_height - h) // 2
+        confirm_win.geometry(f"{w}x{h}+{x}+{y}")
+        
+        border = tk.Frame(confirm_win, bg=BORDER, bd=1)
+        border.pack(fill="both", expand=True)
+        
+        main = tk.Frame(border, bg=BG_CARD, padx=20, pady=16)
+        main.pack(fill="both", expand=True, padx=1, pady=1)
+        
+        font_bold = tkfont.Font(family="Segoe UI", size=11, weight="bold")
+        font_regular = tkfont.Font(family="Segoe UI", size=10)
+        
+        tk.Label(
+            main, text="🔌 כיבוי המחשב",
+            font=font_bold, bg=BG_CARD, fg=TEXT_MAIN, justify="center"
+        ).pack(fill="x", pady=(0, 6))
+        
+        tk.Label(
+            main, text="האם אתה בטוח שברצונך לכבות את המחשב?",
+            font=font_regular, bg=BG_CARD, fg=TEXT_DIM, justify="center"
+        ).pack(fill="x", pady=(0, 16))
+        
+        btn_row = tk.Frame(main, bg=BG_CARD)
+        btn_row.pack(fill="x")
+        
+        def do_shutdown():
+            confirm_win.destroy()
+            try:
+                subprocess.run(["shutdown", "/s", "/f", "/t", "0"], creationflags=subprocess.CREATE_NO_WINDOW)
+            except Exception:
+                import os
+                os.system("shutdown /s /f /t 0")
+                
+        def do_cancel():
+            confirm_win.destroy()
+            
+        btn_yes = tk.Button(
+            btn_row, text="כן, כבה עכשיו", font=font_regular,
+            bg=ERROR, fg="white", activebackground="#dc2626", activeforeground="white",
+            bd=0, padx=12, pady=5, cursor="hand2", command=do_shutdown
+        )
+        btn_yes.pack(side=tk.LEFT, fill="x", expand=True, padx=(0, 5))
+        
+        btn_no = tk.Button(
+            btn_row, text="ביטול", font=font_regular,
+            bg=BG_INPUT, fg=TEXT_MAIN, activebackground="#2a3550", activeforeground=TEXT_MAIN,
+            bd=0, padx=12, pady=5, cursor="hand2", command=do_cancel
+        )
+        btn_no.pack(side=tk.RIGHT, fill="x", expand=True, padx=(5, 0))
 
     def _open_wifi_panel(self):
         """פותח או סוגר את ממשק בחירת הרשתות"""

@@ -30,7 +30,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
 
         // 0. Advanced Lock Screen Bypass (Keyguard Dismiss)
         try {
@@ -176,26 +175,23 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        // 6. Hardware Accelerometer Sensor Listener (Guarantees 180° rotation on ALL Android OS devices)
+        // 6. Hardware Accelerometer Sensor Listener (Smooth 180° rotation without Activity reloading or flickering)
         try {
+            var isFlipped = false
             orientationEventListener = object : OrientationEventListener(this) {
                 override fun onOrientationChanged(orientation: Int) {
                     if (orientation == ORIENTATION_UNKNOWN) return
                     
                     if (orientation in 135..225) {
                         // Upside Down (Camera at bottom)
-                        try {
-                            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                        } catch (e: Exception) {}
-                        if (::webView.isInitialized) {
+                        if (!isFlipped && ::webView.isInitialized) {
+                            isFlipped = true
                             webView.rotation = 180f
                         }
                     } else if (orientation in 0..45 || orientation >= 315) {
                         // Normal Upright (Camera at top)
-                        try {
-                            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        } catch (e: Exception) {}
-                        if (::webView.isInitialized) {
+                        if (isFlipped && ::webView.isInitialized) {
+                            isFlipped = false
                             webView.rotation = 0f
                         }
                     }

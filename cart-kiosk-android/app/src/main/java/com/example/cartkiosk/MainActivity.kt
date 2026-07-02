@@ -20,10 +20,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.view.WindowManager
+import android.view.OrientationEventListener
+import android.content.pm.ActivityInfo
 
 class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var batteryReceiver: BroadcastReceiver? = null
+    private var orientationEventListener: OrientationEventListener? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -172,6 +175,38 @@ class MainActivity : ComponentActivity() {
                 // Do nothing, absolutely blocking back button and back gestures
             }
         })
+
+        // 6. Hardware Accelerometer Sensor Listener (Guarantees 180° rotation on ALL Android OS devices)
+        try {
+            orientationEventListener = object : OrientationEventListener(this) {
+                override fun onOrientationChanged(orientation: Int) {
+                    if (orientation == ORIENTATION_UNKNOWN) return
+                    
+                    if (orientation in 135..225) {
+                        // Upside Down (Camera at bottom)
+                        try {
+                            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                        } catch (e: Exception) {}
+                        if (::webView.isInitialized) {
+                            webView.rotation = 180f
+                        }
+                    } else if (orientation in 0..45 || orientation >= 315) {
+                        // Normal Upright (Camera at top)
+                        try {
+                            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        } catch (e: Exception) {}
+                        if (::webView.isInitialized) {
+                            webView.rotation = 0f
+                        }
+                    }
+                }
+            }
+            if (orientationEventListener?.canDetectOrientation() == true) {
+                orientationEventListener?.enable()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("Kiosk", "Failed to start orientation listener: ${e.message}")
+        }
     }
 
     private fun registerBatteryMonitor() {
@@ -201,6 +236,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            orientationEventListener?.disable()
+        } catch (e: Exception) {}
         batteryReceiver?.let {
             try {
                 unregisterReceiver(it)

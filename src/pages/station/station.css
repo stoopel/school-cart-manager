@@ -304,6 +304,13 @@
   -webkit-transform: scaleX(-1) !important;
 }
 
+/* Adjust camera video feed when tablet is physically upside-down (180°) */
+html[data-kiosk-upside-down="true"] #qr-reader-return video,
+html[data-kiosk-upside-down="true"] #qr-reader-take video {
+  transform: scaleY(-1) !important;
+  -webkit-transform: scaleY(-1) !important;
+}
+
 /* Number grid */
 .station-numgrid {
   display: grid;

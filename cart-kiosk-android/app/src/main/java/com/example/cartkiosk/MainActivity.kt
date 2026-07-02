@@ -187,12 +187,14 @@ class MainActivity : ComponentActivity() {
                         if (!isFlipped && ::webView.isInitialized) {
                             isFlipped = true
                             webView.rotation = 180f
+                            webView.evaluateJavascript("document.documentElement.setAttribute('data-kiosk-upside-down', 'true')", null)
                         }
                     } else if (orientation in 0..45 || orientation >= 315) {
                         // Normal Upright (Camera at top)
                         if (isFlipped && ::webView.isInitialized) {
                             isFlipped = false
                             webView.rotation = 0f
+                            webView.evaluateJavascript("document.documentElement.setAttribute('data-kiosk-upside-down', 'false')", null)
                         }
                     }
                 }

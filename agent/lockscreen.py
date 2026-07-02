@@ -381,11 +381,13 @@ def remove_tray_icon():
 
 
 class LessonWidget(tk.Toplevel):
-    def __init__(self, parent_root, subject, teacher_name, end_time_str, on_disconnect):
+    def __init__(self, parent_root, subject, teacher_name, end_time_str, on_disconnect, student_name="", class_name=""):
         super().__init__(parent_root)
         self.parent_root = parent_root
         self.subject = subject
         self.teacher_name = teacher_name
+        self.student_name = student_name
+        self.class_name = class_name
         self.on_disconnect = on_disconnect
         
         self.title("Lesson Widget")
@@ -399,7 +401,7 @@ class LessonWidget(tk.Toplevel):
         
         # Dimensions & position
         self.width = 280
-        self.height = 65
+        self.height = 80
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
@@ -429,10 +431,24 @@ class LessonWidget(tk.Toplevel):
         
         # Info container
         right_box = tk.Frame(self.main_frame, bg=BG_CARD)
-        right_box.pack(side=tk.RIGHT, fill="both", expand=True, padx=(0, 12), pady=8)
+        right_box.pack(side=tk.RIGHT, fill="both", expand=True, padx=(0, 12), pady=6)
         
-        font_sub = tkfont.Font(family="Segoe UI", size=11, weight="bold")
-        font_timer = tkfont.Font(family="Segoe UI", size=9)
+        font_student = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        font_sub = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+        font_timer = tkfont.Font(family="Segoe UI", size=8)
+        
+        student_txt = f"תלמיד: {self.student_name}" if self.student_name else ""
+        if self.class_name:
+            student_txt += f" | כיתה {self.class_name}" if not student_txt else f" ({self.class_name})"
+            
+        if student_txt:
+            self.lbl_student = tk.Label(
+                right_box, text=student_txt,
+                font=font_student, bg=BG_CARD, fg=TEXT_NUM, anchor="e", justify="right"
+            )
+            self.lbl_student.pack(fill="x", anchor="e")
+        else:
+            self.lbl_student = None
         
         teacher_txt = f" | {self.teacher_name}" if self.teacher_name else ""
         self.lbl_info = tk.Label(
@@ -448,7 +464,11 @@ class LessonWidget(tk.Toplevel):
         self.lbl_timer.pack(fill="x", anchor="e")
         
         # Draggable bindings (using absolute mouse coordinates to prevent jitter)
-        for w in (self, self.border_frame, self.main_frame, left_box, right_box, self.lbl_info, self.lbl_timer):
+        bind_widgets = [self, self.border_frame, self.main_frame, left_box, right_box, self.lbl_info, self.lbl_timer]
+        if self.lbl_student:
+            bind_widgets.append(self.lbl_student)
+            
+        for w in bind_widgets:
             w.bind("<Button-1>", self.start_drag)
             w.bind("<B1-Motion>", self.drag)
             
@@ -1387,7 +1407,8 @@ class LockScreen:
 
     def _do_unlock(self):
         uninstall_keyboard_hook()
-        set_task_manager_enabled(True)
+        is_bypass = getattr(self, "is_teacher_bypass", False)
+        set_task_manager_enabled(is_bypass)
         self.root.attributes("-topmost", False)
         self.root.withdraw()
         start_explorer()
@@ -1584,13 +1605,13 @@ class LockScreen:
     def set_disconnect_callback(self, cb):
         self._on_disconnect_clicked = cb
 
-    def show_lesson_widget(self, subject, teacher_name, end_time_str):
-        self.root.after(0, lambda: self._show_lesson_widget_inner(subject, teacher_name, end_time_str))
+    def show_lesson_widget(self, subject, teacher_name, end_time_str, student_name="", class_name=""):
+        self.root.after(0, lambda: self._show_lesson_widget_inner(subject, teacher_name, end_time_str, student_name, class_name))
 
-    def _show_lesson_widget_inner(self, subject, teacher_name, end_time_str):
+    def _show_lesson_widget_inner(self, subject, teacher_name, end_time_str, student_name="", class_name=""):
         self.hide_lesson_widget()
         self.lesson_widget = LessonWidget(
-            self.root, subject, teacher_name, end_time_str, self._on_disconnect_clicked
+            self.root, subject, teacher_name, end_time_str, self._on_disconnect_clicked, student_name, class_name
         )
 
     def hide_lesson_widget(self):

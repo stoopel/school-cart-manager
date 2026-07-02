@@ -449,12 +449,17 @@ class CartAgent:
 
     def _do_unlock(self, name: str):
         self._unlocked = True
+        self.screen.is_teacher_bypass = self._teacher_bypass
         self.screen.unlock(name)
         if not self._teacher_bypass and self._lesson_data:
+            s_name = self.loan_data.get('student_name', '') if self.loan_data else ""
+            c_name = self.loan_data.get('class_name', '') if self.loan_data else ""
             self.screen.show_lesson_widget(
                 self._lesson_data.get('subject', 'שיעור'),
                 self._lesson_data.get('teacher_name', ''),
-                self._lesson_data.get('end_time', '')
+                self._lesson_data.get('end_time', ''),
+                student_name=s_name,
+                class_name=c_name
             )
 
     def _on_unlock(self):
@@ -485,12 +490,9 @@ class CartAgent:
 
             log.info(f"Disconnecting student_id={student_id} from lesson_id={lesson_id}")
             
-            # 1. Update active loan in DB: set lesson_id = NULL
-            db.clear_loan_lesson(loan_id)
-            
-            # 2. Delete participant from lesson_participants in DB
+            # Use secure server RPC to disconnect student and clear loan lesson_id
+            db.disconnect_student_from_lesson(loan_id, student_id, lesson_id)
             if lesson_id:
-                db.remove_lesson_participant(lesson_id, student_id)
                 db.log_event(device_id, loan_id, "student_disconnect", {"lesson_id": lesson_id})
 
             # 3. Clean up local state
@@ -877,10 +879,14 @@ class CartAgent:
                     self._check_charging_after_wake()
                     self._refresh_loan_state(f"wake {elapsed_time:.0f}s")
                     if self._unlocked and not self._teacher_bypass and self._lesson_data:
+                        s_name = self.loan_data.get('student_name', '') if self.loan_data else ""
+                        c_name = self.loan_data.get('class_name', '') if self.loan_data else ""
                         self.screen.show_lesson_widget(
                             self._lesson_data.get('subject', 'שיעור'),
                             self._lesson_data.get('teacher_name', ''),
-                            self._lesson_data.get('end_time', '')
+                            self._lesson_data.get('end_time', ''),
+                            student_name=s_name,
+                            class_name=c_name
                         )
                 elif elapsed_time > 60.0:
                     log.info(f"CPU Lag detected (time gap={elapsed_time:.0f}s, mono gap={elapsed_mono:.1f}s). Skipping sleep wake checks.")

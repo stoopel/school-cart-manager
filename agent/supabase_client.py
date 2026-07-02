@@ -277,6 +277,15 @@ def clear_loan_lesson(loan_id) -> bool:
     result = _patch("device_loans", {"lesson_id": None}, {"id": f"eq.{loan_id}"})
     return bool(result)
 
+def disconnect_student_from_lesson(loan_id, student_id, lesson_id=None) -> bool:
+    """מנתק תלמיד משיעור באופן מאובטח באמצעות RPC בשרת"""
+    result = _rpc("disconnect_student_from_lesson", {
+        "p_loan_id": loan_id,
+        "p_student_id": student_id,
+        "p_lesson_id": lesson_id,
+    })
+    return bool(result)
+
 def get_lesson_status(lesson_id: str) -> dict | None:
     """בדיקה תקופתית של סטטוס שיעור (ל-polling fallback)"""
     rows = _get("lessons", {"id": f"eq.{lesson_id}",

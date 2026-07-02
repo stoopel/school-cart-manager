@@ -468,10 +468,13 @@ class CartAgent:
     def _on_student_disconnect(self):
         log.info("Student requested disconnection from lesson via floating widget.")
         self._unlocked = False
+        self._lesson_data = None
+        self._lesson_timer = None
         
         # Relock screen immediately to secure the PC
         if self.screen:
             self.screen.hide_lesson_widget()
+            self.screen.update_lesson_timer("")
             self.screen.relock("מתנתק מהשיעור... ⏳")
             
         # Run DB updates in a background thread to prevent GUI lag
@@ -616,6 +619,10 @@ class CartAgent:
         polling_counter = 0
         while self._running:
             time.sleep(1)
+            # חסימת מנהל משימות לתלמיד בזמן חיבור (ללא שינוי Registry)
+            if self._unlocked and not self._teacher_bypass and self.screen:
+                self.screen.check_and_close_task_manager()
+
             if not self._lesson_timer:
                 warned = False
                 continue

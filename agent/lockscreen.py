@@ -96,6 +96,10 @@ def free_interception_dll():
             if _interception_context:
                 _interception_running = False
                 try:
+                    _interception_dll.interception_set_filter(_interception_context, None, 0)
+                except Exception:
+                    pass
+                try:
                     _interception_dll.interception_destroy_context(_interception_context)
                 except Exception:
                     pass
@@ -199,7 +203,7 @@ def _interception_thread_proc():
                     if not is_system:
                         dll.interception_send(context, device, ctypes.byref(stroke), 1)
                 else:
-                    if scan_code in ALLOWED_SCAN_CODES:
+                    if base_code in ALLOWED_SCAN_CODES:
                         dll.interception_send(context, device, ctypes.byref(stroke), 1)
                     else:
                         # BLOCK key by ignoring it and not sending it to the OS
@@ -290,10 +294,14 @@ def uninstall_keyboard_hook():
         _keyboard_hook = None
         _callback_ptr = None
 
-def set_task_manager_enabled(enabled: bool):
+def set_task_manager_enabled(enabled: bool = True):
+    """מבטיח שה-Registry נקי ואין חסימות מנהל משימות שישארו ב-Windows"""
     try:
         key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System")
-        winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 0 if enabled else 1)
+        try:
+            winreg.DeleteValue(key, "DisableTaskMgr")
+        except FileNotFoundError:
+            pass
         winreg.CloseKey(key)
     except Exception:
         pass
@@ -1377,6 +1385,7 @@ class LockScreen:
             self.lbl_title.config(text="הכנס קוד שיעור (4 ספרות)", fg=ACCENT)
             self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך")
             self.lbl_status.config(text="")
+            self.update_lesson_timer("")
         self.root.after(0, _do)
 
     def show_lesson_ended(self):
@@ -1407,8 +1416,7 @@ class LockScreen:
 
     def _do_unlock(self):
         uninstall_keyboard_hook()
-        is_bypass = getattr(self, "is_teacher_bypass", False)
-        set_task_manager_enabled(is_bypass)
+        set_task_manager_enabled(True)
         self.root.attributes("-topmost", False)
         self.root.withdraw()
         start_explorer()
@@ -1451,7 +1459,19 @@ class LockScreen:
                 self.lbl_status.pack(pady=(8, 0))
                 
             self.lbl_status.config(text=message, fg=WARNING)
+            self.update_lesson_timer("")
         self.root.after(0, _do)
+
+    def check_and_close_task_manager(self):
+        """חוסם מנהל משימות לתלמיד ברמת חלון ללא נגיעה ב-Registry"""
+        try:
+            for title_or_class in ("TaskManagerWindow", "Task Manager", "מנהל המשימות"):
+                hwnd = user32.FindWindowW(title_or_class if title_or_class == "TaskManagerWindow" else None,
+                                          title_or_class if title_or_class != "TaskManagerWindow" else None)
+                if hwnd:
+                    user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+        except Exception:
+            pass
 
     # ── Freeze / Unfreeze ─────────────────────────────────────
 

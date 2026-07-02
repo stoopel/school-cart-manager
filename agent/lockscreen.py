@@ -67,6 +67,7 @@ _interception_dll = None
 _interception_context = None
 _interception_thread = None
 _interception_running = False
+_interception_filter_active = True
 _wifi_panel_active = False
 
 # Scan Code Set 1 Whitelist for CartAgent input:
@@ -191,6 +192,11 @@ def _interception_thread_proc():
             
             res = dll.interception_receive(context, device, ctypes.byref(stroke), 1)
             if res > 0:
+                if not _interception_filter_active:
+                    # UNLOCKED: Pass 100% of keys directly to Windows without filtering
+                    dll.interception_send(context, device, ctypes.byref(stroke), 1)
+                    continue
+
                 scan_code = stroke.key.code
                 base_code = scan_code & 0x7F
                 if _wifi_panel_active:
@@ -256,9 +262,14 @@ user32.CallNextHookEx.restype = wintypes.LPARAM
 
 def install_keyboard_hook():
     global _keyboard_hook, _callback_ptr
-    global _interception_context, _interception_thread, _interception_running
+    global _interception_context, _interception_thread, _interception_running, _interception_filter_active
     
-    # 1. Attempt kernel-level blocking via Veyon's Interception driver first
+    _interception_filter_active = True
+    
+    # 1. Attempt kernel-level blocking via Interception driver first
+    if _interception_context is not None:
+        return  # Driver context already initialized & active
+        
     dll = load_interception()
     if dll is not None:
         try:
@@ -281,14 +292,12 @@ def install_keyboard_hook():
 
 def uninstall_keyboard_hook():
     global _keyboard_hook, _callback_ptr
-    global _interception_context, _interception_thread, _interception_running
+    global _interception_filter_active
     
-    # 1. Stop Interception driver context and unload DLL
-    free_interception_dll()
-    _interception_context = None
-    _interception_thread = None
+    # 1. Disable Interception filtering (pass 100% of keys directly to Windows)
+    _interception_filter_active = False
         
-    # 2. Stop fallback hook
+    # 2. Stop fallback Win32 hook
     if _keyboard_hook is not None:
         user32.UnhookWindowsHookEx(_keyboard_hook)
         _keyboard_hook = None
@@ -1386,6 +1395,10 @@ class LockScreen:
             self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך")
             self.lbl_status.config(text="")
             self.update_lesson_timer("")
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.focus_force()
         self.root.after(0, _do)
 
     def show_lesson_ended(self):
@@ -1460,6 +1473,10 @@ class LockScreen:
                 
             self.lbl_status.config(text=message, fg=WARNING)
             self.update_lesson_timer("")
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.focus_force()
         self.root.after(0, _do)
 
     def check_and_close_task_manager(self):

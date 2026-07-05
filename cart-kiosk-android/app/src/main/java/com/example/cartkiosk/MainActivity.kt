@@ -22,6 +22,9 @@ import android.os.BatteryManager
 import android.view.WindowManager
 import android.view.OrientationEventListener
 import android.content.pm.ActivityInfo
+import android.provider.Settings
+import android.os.Build
+import android.webkit.JavascriptInterface
 
 class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
@@ -105,6 +108,9 @@ class MainActivity : ComponentActivity() {
                 cacheMode = WebSettings.LOAD_DEFAULT
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             }
+
+            // Register Kiosk Javascript Bridge for Web App interaction (e.g. Wi-Fi panel launch)
+            addJavascriptInterface(KioskBridge(), "AndroidKiosk")
 
             // Load the school cart manager station loan interface
             loadUrl("https://school-cart-manager.vercel.app/station")
@@ -241,6 +247,31 @@ class MainActivity : ComponentActivity() {
             try {
                 unregisterReceiver(it)
             } catch (e: Exception) {}
+        }
+    }
+
+    // Javascript Interface Bridge for Web App
+    inner class KioskBridge {
+        @JavascriptInterface
+        fun openWifiPanel() {
+            runOnUiThread {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val intent = Intent("android.settings.panel.action.WIFI")
+                        startActivity(intent)
+                    } else {
+                        val intent = Intent(Settings.ACTION_WIFI_SETTINGS)
+                        startActivity(intent)
+                    }
+                } catch (e: Exception) {
+                    try {
+                        val intent = Intent(Settings.ACTION_WIFI_SETTINGS)
+                        startActivity(intent)
+                    } catch (ex: Exception) {
+                        android.util.Log.e("Kiosk", "Failed to open Wi-Fi settings: ${ex.message}")
+                    }
+                }
+            }
         }
     }
 

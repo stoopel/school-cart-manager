@@ -751,7 +751,7 @@ export default function ImportCenter() {
                   </p>
                 </div>
                 <div style={{ marginTop: 'auto' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12, fontFamily: 'monospace' }}>גודל קובץ: 11.8 MB | גרסה: 1.1.0 (ייצור)</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12, fontFamily: 'monospace' }}>גודל קובץ: 11.8 MB | גרסה: 1.2.0 (ייצור)</div>
                   <a 
                     href="/CartKiosk.apk" 
                     download="CartKiosk.apk" 

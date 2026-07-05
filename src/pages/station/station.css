@@ -335,3 +335,47 @@ html[data-kiosk-upside-down="true"] #qr-reader-take video {
 }
 .station-numkey:hover  { background: rgba(99,102,241,0.2); border-color: var(--station-accent); }
 .station-numkey:active { transform: scale(0.95); }
+
+/* Offline Warning Banner & Wi-Fi Panel Button */
+.station-offline-banner {
+  background: linear-gradient(90deg, #ef4444, #dc2626);
+  color: #ffffff;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-weight: 700;
+  font-size: 1rem;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+  z-index: 9999;
+}
+
+.station-offline-msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.station-wifi-btn {
+  background: #ffffff;
+  color: #dc2626;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Heebo', sans-serif;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.station-wifi-btn:hover {
+  background: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.station-wifi-btn:active {
+  transform: scale(0.96);
+}

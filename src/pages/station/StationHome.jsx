@@ -21,6 +21,31 @@ export default function StationHome() {
   const [passcode, setPasscode] = useState('')
   const [authError, setAuthError] = useState('')
 
+  const [isOffline, setIsOffline] = useState(!navigator.onLine)
+
+  // Network offline status listener
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false)
+    const handleOffline = () => setIsOffline(true)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  // Launch native Android Wi-Fi panel when offline
+  function handleOpenWifi() {
+    if (window.AndroidKiosk && typeof window.AndroidKiosk.openWifiPanel === 'function') {
+      window.AndroidKiosk.openWifiPanel()
+    } else {
+      alert('פתח את הגדרות המכשיר כדי להתחבר לרשת Wi-Fi')
+    }
+  }
+
   // 1. Clock timer
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000)
@@ -194,8 +219,23 @@ export default function StationHome() {
     }
   }, [passcode])
 
+  async function handleSetMode(newMode) {
+    if (newMode && cart) {
+      // Re-fetch cart settings dynamically on action start (0 Realtime quota)
+      const { data: updatedCart } = await supabase
+        .from('carts')
+        .select('id, name, display_name, location, allow_manual_entry, enable_charge_tracking')
+        .eq('id', cart.id)
+        .is('deleted_at', null)
+        .single()
+      if (updatedCart) setCart(updatedCart)
+    }
+    setMode(newMode)
+  }
+
   function onDone() {
     setMode(null)
+    validateAndLoadCart()
     loadStats()
   }
 
@@ -371,6 +411,16 @@ export default function StationHome() {
 
   return (
     <div className="station-root">
+      {/* Offline Warning Banner (rendered ONLY when isOffline === true) */}
+      {isOffline && (
+        <div className="station-offline-banner">
+          <span className="station-offline-msg">⚠️ אין חיבור לרשת האינטרנט</span>
+          <button className="station-wifi-btn" onClick={handleOpenWifi}>
+            📶 להתחברות לרשת Wi-Fi
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="station-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -390,13 +440,13 @@ export default function StationHome() {
         </div>
 
         <div className="station-actions">
-          <button className="station-btn station-btn-take" onClick={() => setMode('take')}>
+          <button className="station-btn station-btn-take" onClick={() => handleSetMode('take')}>
             <span className="station-btn-icon">📥</span>
             <span className="station-btn-label">לקחתי מחשב</span>
             <span className="station-btn-sub">רישום והזדהות</span>
           </button>
 
-          <button className="station-btn station-btn-return" onClick={() => setMode('return')}>
+          <button className="station-btn station-btn-return" onClick={() => handleSetMode('return')}>
             <span className="station-btn-icon">📤</span>
             <span className="station-btn-label">החזרתי מחשב</span>
             <span className="station-btn-sub">סריקת QR / מספר</span>

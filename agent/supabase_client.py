@@ -107,6 +107,8 @@ def get_active_loan(asset_tag):
         "device_loans.checkin_at": "is.null"
     }
     devs = _get("devices", params)
+    if devs is None:
+        return "OFFLINE"
     if not devs:
         return None
     

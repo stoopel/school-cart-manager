@@ -105,8 +105,22 @@ function LessonCard({ lesson, now, onRefresh }) {
 
   async function act(update) {
     setBusy(true)
-    await supabase.from('lessons').update(update).eq('id', lesson.id)
-    setBusy(false); onRefresh()
+    try {
+      await fetch('/api/teacher/lessons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_status',
+          lessonId: lesson.id,
+          status: update.status || (update.is_locked ? 'active' : 'active')
+        })
+      })
+    } catch (e) {
+      console.error('Error updating lesson:', e)
+    } finally {
+      setBusy(false)
+      onRefresh()
+    }
   }
 
   async function extendLesson(minutes) {
@@ -465,34 +479,31 @@ function OpenLessonForm({ teacher, onCreated, onCancel }) {
     e.preventDefault()
     setSaving(true)
 
-    const { data: code, error: codeErr } = await supabase.rpc('generate_lesson_code')
-    if (codeErr || !code) { alert('שגיאה בייצור קוד'); setSaving(false); return }
+    try {
+      const res = await fetch('/api/teacher/lessons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          teacherId: teacher.id,
+          subject: subject.trim(),
+          minutes: duration,
+          isLocked
+        })
+      })
+      const json = await res.json()
+      setSaving(false)
+      if (!res.ok || json.error) {
+        alert('שגיאה: ' + (json.error || 'נכשלה יצירת השיעור'))
+        return
+      }
 
-    let startDt
-    if (startMode === 'now') {
-      startDt = new Date()
-    } else {
-      const [h, m] = startTime.split(':').map(Number)
-      startDt = new Date()
-      startDt.setHours(h, m, 0, 0)
-      if (startDt < new Date()) startDt.setDate(startDt.getDate() + 1) // מחר
+      setNewCode(json.lesson.lesson_code)
+      onCreated()
+    } catch (err) {
+      setSaving(false)
+      alert('שגיאה בחיבור לשרת: ' + err.message)
     }
-    const endDt = new Date(startDt.getTime() + duration * 60000)
-    const status = startMode === 'now' ? 'active' : 'scheduled'
-
-    const { error } = await supabase.from('lessons').insert({
-      teacher_id:       teacher.id,
-      lesson_code:      code,
-      subject:          subject.trim() || null,
-      duration_minutes: duration,
-      start_time:       startDt.toISOString(),
-      end_time:         endDt.toISOString(),
-      status,
-    })
-    setSaving(false)
-    if (error) { alert('שגיאה: ' + error.message); return }
-    setNewCode(code)
-    onCreated()
   }
 
   if (newCode) return (
@@ -629,10 +640,23 @@ function TeacherLogin({ onLogin }) {
   async function submit(e) {
     e.preventDefault()
     setError(''); setLoading(true)
-    const { data, error: rpcError } = await supabase.rpc('verify_teacher_id', { entered_id: id.trim() })
-    setLoading(false)
-    if (rpcError || !data || !data.is_valid) { setError('תעודת זהות לא נמצאה במערכת.'); return }
-    onLogin({ id: data.teacher_id, name: data.teacher_name })
+    try {
+      const res = await fetch('/api/teacher/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nationalId: id.trim() })
+      })
+      const json = await res.json()
+      setLoading(false)
+      if (!res.ok || !json.isValid) {
+        setError(json.error || 'תעודת זהות לא נמצאה במערכת.')
+        return
+      }
+      onLogin({ id: json.teacher.id, name: json.teacher.name })
+    } catch (err) {
+      setLoading(false)
+      setError('שגיאה בחיבור לשרת: ' + err.message)
+    }
   }
 
   return (
@@ -686,23 +710,21 @@ function TeacherDashboard({ teacher, onLogout }) {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const nowIso = new Date().toISOString()
     try {
-      await supabase
-        .from('lessons')
-        .update({ status: 'ended' })
-        .eq('status', 'active')
-        .lt('end_time', nowIso)
+      const res = await fetch('/api/teacher/lessons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list', teacherId: teacher.id })
+      })
+      const json = await res.json()
+      if (res.ok && json.lessons) {
+        setLessons(json.lessons)
+      }
     } catch (e) {
-      console.error('Error auto-ending lessons:', e)
+      console.error('Error loading lessons:', e)
+    } finally {
+      setLoading(false)
     }
-    const { data } = await supabase
-      .from('teacher_lessons')
-      .select('*')
-      .eq('teacher_id', teacher.id)
-      .order('start_time')
-    setLessons(data ?? [])
-    setLoading(false)
   }, [teacher.id])
 
   useEffect(() => { load() }, [load])

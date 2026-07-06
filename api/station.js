@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   try {
     const { route } = req.query || {}
     const body = req.body || {}
-    const targetRoute = route || body.endpoint || body.action
+    const targetRoute = body.route || body.endpoint || body.action || req.query?.route
 
     // Route 1: Cart Details & Stats
     if (targetRoute === 'cart-details') {

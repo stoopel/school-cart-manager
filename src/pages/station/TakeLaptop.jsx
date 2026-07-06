@@ -72,10 +72,10 @@ export default function TakeLaptop({ cart, onDone }) {
     if (idValue.length < 5) { setErrorMsg('תעודת זהות חייבת להכיל לפחות 5 ספרות'); return }
 
     try {
-      const res = await fetch('/api/station/take-laptop', {
+      const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'confirm_id', cartId: cart.id, nationalId: idValue })
+        body: JSON.stringify({ route: 'take-laptop', action: 'confirm_id', cartId: cart.id, nationalId: idValue })
       })
       const json = await res.json()
       if (!res.ok || json.error) {
@@ -159,10 +159,10 @@ export default function TakeLaptop({ cart, onDone }) {
     }
 
     try {
-      const res = await fetch('/api/station/take-laptop', {
+      const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ route: 'take-laptop', ...payload })
       })
       const json = await res.json()
       if (!res.ok || json.error) {

@@ -480,7 +480,7 @@ function OpenLessonForm({ teacher, onCreated, onCancel }) {
     setSaving(true)
 
     try {
-      const res = await fetch('/api/teacher/lessons', {
+      const res = await fetch('/api/teacher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -641,10 +641,10 @@ function TeacherLogin({ onLogin }) {
     e.preventDefault()
     setError(''); setLoading(true)
     try {
-      const res = await fetch('/api/teacher/verify', {
+      const res = await fetch('/api/teacher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nationalId: id.trim() })
+        body: JSON.stringify({ action: 'verify', nationalId: id.trim() })
       })
       const json = await res.json()
       setLoading(false)
@@ -711,7 +711,7 @@ function TeacherDashboard({ teacher, onLogout }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/teacher/lessons', {
+      const res = await fetch('/api/teacher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'list', teacherId: teacher.id })

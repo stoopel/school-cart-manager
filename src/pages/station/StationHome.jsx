@@ -83,10 +83,10 @@ export default function StationHome() {
     setAuthError('')
 
     try {
-      const res = await fetch('/api/station/cart-details', {
+      const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cartId })
+        body: JSON.stringify({ route: 'cart-details', cartId })
       })
       const json = await res.json()
       if (!res.ok || json.error) {
@@ -113,10 +113,10 @@ export default function StationHome() {
       }
 
       // Validate the stored code via API
-      const vRes = await fetch('/api/station/verify-kiosk-code', {
+      const vRes = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cartId, code: storedCode })
+        body: JSON.stringify({ route: 'verify-kiosk-code', cartId, code: storedCode })
       })
       const vJson = await vRes.json()
       if (vJson.isValid) {
@@ -157,10 +157,10 @@ export default function StationHome() {
   async function loadStats() {
     if (!cart) return
     try {
-      const res = await fetch('/api/station/cart-details', {
+      const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cartId: cart.id })
+        body: JSON.stringify({ route: 'cart-details', cartId: cart.id })
       })
       const json = await res.json()
       if (json.cart) setCart(json.cart)
@@ -179,10 +179,10 @@ export default function StationHome() {
     setAuthError('')
 
     try {
-      const res = await fetch('/api/station/verify-kiosk-code', {
+      const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cartId: cart.id, code: passcode })
+        body: JSON.stringify({ route: 'verify-kiosk-code', cartId: cart.id, code: passcode })
       })
       const json = await res.json()
       if (res.ok && json.isValid) {

@@ -44,7 +44,8 @@ API_BASE_URL = _CFG.get("api_base_url", "https://school-cart-manager.vercel.app/
 
 def _api_post(endpoint, payload):
     try:
-        url = f"{API_BASE_URL}/{endpoint}"
+        url = API_BASE_URL
+        payload["endpoint"] = endpoint
         r = requests.post(url, json=payload, timeout=10, verify=False)
         r.raise_for_status()
         return r.json()

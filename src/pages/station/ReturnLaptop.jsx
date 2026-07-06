@@ -119,10 +119,10 @@ export default function ReturnLaptop({ cart, onDone }) {
   async function lookupDevice(deviceIdOrNumber) {
     setErrorMsg('')
     try {
-      const res = await fetch('/api/station/return-laptop', {
+      const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cartId: cart.id, deviceIdOrNumber })
+        body: JSON.stringify({ route: 'return-laptop', cartId: cart.id, deviceIdOrNumber })
       })
       const json = await res.json()
       if (!res.ok || json.error) {
@@ -140,10 +140,10 @@ export default function ReturnLaptop({ cart, onDone }) {
 
   async function confirmReturn() {
     try {
-      const res = await fetch('/api/station/return-laptop', {
+      const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cartId: cart.id, loanId: loan.id })
+        body: JSON.stringify({ route: 'return-laptop', cartId: cart.id, loanId: loan.id })
       })
       const json = await res.json()
       if (!res.ok || json.error) {

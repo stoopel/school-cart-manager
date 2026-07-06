@@ -782,7 +782,7 @@ export default function ImportCenter() {
                   </p>
                 </div>
                 <div style={{ marginTop: 'auto' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12, fontFamily: 'monospace' }}>גודל קובץ: 59.0 MB | גרסה: 4.6.0 (ייצור)</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12, fontFamily: 'monospace' }}>גודל קובץ: 59.0 MB | גרסה: 5.0.0 (ייצור)</div>
                   <a 
                     href="/setup_agent.exe" 
                     download="setup_agent.exe" 

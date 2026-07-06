@@ -38,7 +38,19 @@ HEADERS = {
 }
 
 
-# ─── REST helpers ─────────────────────────────────────────────
+# ─── REST & API helpers ───────────────────────────────────────
+
+API_BASE_URL = _CFG.get("api_base_url", "https://school-cart-manager.vercel.app/api/agent")
+
+def _api_post(endpoint, payload):
+    try:
+        url = f"{API_BASE_URL}/{endpoint}"
+        r = requests.post(url, json=payload, timeout=10, verify=False)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        log.error(f"API POST {endpoint}: {e}")
+        return None
 
 def _get(path, params=None):
     try:
@@ -100,59 +112,10 @@ def get_device_id_by_asset_tag(asset_tag):
     return rows[0]["id"] if rows else None
 
 def get_active_loan(asset_tag):
-    params = {
-        "asset_tag": f"eq.{asset_tag}",
-        "select": "id,device_number,cart_id,carts(enable_charge_tracking),device_loans(id,student_id,checkout_at,digital_login_at,lesson_id,students(id,national_id,name,class_name,grade,charge_strikes))",
-        "device_loans.status": "eq.active",
-        "device_loans.checkin_at": "is.null"
-    }
-    devs = _get("devices", params)
-    if devs is None:
+    res = _api_post("active-loan", {"assetTag": asset_tag})
+    if res is None:
         return "OFFLINE"
-    if not devs:
-        return None
-    
-    dev = devs[0]
-    loans = dev.get("device_loans")
-    if not loans or not isinstance(loans, list):
-        return None
-        
-    loan = loans[0]
-    students_data = loan.get("students")
-    if not students_data:
-        return None
-        
-    s = None
-    if isinstance(students_data, dict):
-        s = students_data
-    elif isinstance(students_data, list) and students_data:
-        s = students_data[0]
-        
-    if not s:
-        return None
-
-    # Fetch per-cart charge tracking setting
-    enable_tracking = True
-    carts_data = dev.get("carts")
-    if isinstance(carts_data, dict):
-        enable_tracking = carts_data.get("enable_charge_tracking", True)
-    elif isinstance(carts_data, list) and carts_data:
-        enable_tracking = carts_data[0].get("enable_charge_tracking", True)
-
-    return {
-        "loan_id":       loan["id"],
-        "device_id":     dev["id"],
-        "device_number": dev.get("device_number"),
-        "checkout_at":   loan["checkout_at"],
-        "lesson_id":     loan.get("lesson_id"),
-        "student_id":    s["id"],
-        "national_id":   s["national_id"],
-        "student_name":  s["name"],
-        "class_name":    s.get("class_name", ""),
-        "grade":         s.get("grade", ""),
-        "charge_strikes": s.get("charge_strikes", 0),
-        "enable_charge_tracking": enable_tracking,
-    }
+    return res.get("loan")
 
 def log_digital_login(loan_id, device_id):
     now = datetime.utcnow().isoformat() + "Z"
@@ -165,11 +128,10 @@ def log_digital_logout(loan_id, device_id):
     _patch("devices", {"status": "locked", "last_seen": now}, {"id": f"eq.{device_id}"})
 
 def heartbeat(device_id, battery_level=None, is_charging=None):
-    now = datetime.utcnow().isoformat() + "Z"
-    data = {"last_seen": now}
-    if battery_level is not None: data["battery_level"] = battery_level
-    if is_charging   is not None: data["is_charging"]   = is_charging
-    _patch("devices", data, {"id": f"eq.{device_id}"})
+    payload = {"deviceId": device_id}
+    if battery_level is not None: payload["batteryLevel"] = battery_level
+    if is_charging is not None: payload["isCharging"] = is_charging
+    _api_post("heartbeat", payload)
 
 def save_battery_before_sleep(device_id, battery_level):
     """שמור רמת סוללה לפני שינה – לשימוש בהשוואה בהתעוררות"""
@@ -185,37 +147,32 @@ def get_last_battery(device_id):
     return rows[0] if rows else None
 
 def log_event(device_id, loan_id, event_type, payload=None):
-    _post("event_log", {"device_id": device_id, "loan_id": loan_id,
-                         "source": "agent", "event_type": event_type,
-                         "payload": payload or {}})
+    _api_post("heartbeat", {
+        "deviceId": device_id,
+        "loanId": loan_id,
+        "eventType": event_type,
+        "payload": payload or {}
+    })
 
 
 # ─── מורים ────────────────────────────────────────────────────
 
 def is_teacher(national_id: str) -> dict | None:
-    """מחזיר רשומת מורה אם ת.ז. שייכת למורה פעיל באמצעות RPC מאובטח"""
-    res = _rpc("verify_teacher_id", {"entered_id": national_id})
-    if res and res.get("is_valid"):
-        return {"id": res.get("teacher_id"), "name": res.get("teacher_name")}
+    """מחזיר רשומת מורה אם ת.ז. שייכת למורה פעיל באמצעות API מאובטח"""
+    res = _api_post("verify-id", {"action": "verify_teacher", "nationalId": national_id})
+    if res and res.get("isTeacher"):
+        return res.get("teacher")
     return None
 
 
 # ─── שיעורים ──────────────────────────────────────────────────
 
 def get_active_lesson_by_code(lesson_code: str) -> dict | None:
-    """
-    מחזיר שיעור פעיל לפי קוד + זמן שרת לחישוב offset.
-    מחזיר: {lesson_id, end_time, server_now, is_locked, teacher_name, minutes_remaining}
-    """
-    rows = _get("active_lessons",
-                {"lesson_code": f"eq.{lesson_code}", "select": "*"})
-    if not rows: return None
-    lesson = rows[0]
-
-    # שלוף server NOW() לחישוב offset מדויק באמצעות RPC
-    server_now = _rpc("get_server_time", {})
-    if not server_now:
-        server_now = datetime.utcnow().isoformat() + "Z"
+    """מחזיר שיעור פעיל לפי קוד דרך ה-API"""
+    res = _api_post("lesson", {"action": "get_by_code", "lessonCode": lesson_code})
+    if not res or not res.get("lesson"): return None
+    lesson = res["lesson"]
+    server_now = res.get("server_now") or (datetime.utcnow().isoformat() + "Z")
 
     return {
         "lesson_id":       lesson["id"],
@@ -228,14 +185,11 @@ def get_active_lesson_by_code(lesson_code: str) -> dict | None:
     }
 
 def get_active_lesson_by_id(lesson_id: str) -> dict | None:
-    """מחזיר פרטי שיעור פעיל לפי מזהה UUID לצורך מעקף ריבוט"""
-    rows = _get("active_lessons", {"id": f"eq.{lesson_id}", "select": "*"})
-    if not rows: return None
-    lesson = rows[0]
-
-    server_now = _rpc("get_server_time", {})
-    if not server_now:
-        server_now = datetime.utcnow().isoformat() + "Z"
+    """מחזיר פרטי שיעור פעיל לפי מזהה UUID דרך ה-API"""
+    res = _api_post("lesson", {"action": "get_by_id", "lessonId": lesson_id})
+    if not res or not res.get("lesson"): return None
+    lesson = res["lesson"]
+    server_now = res.get("server_now") or (datetime.utcnow().isoformat() + "Z")
 
     return {
         "lesson_id":       lesson["id"],
@@ -247,61 +201,33 @@ def get_active_lesson_by_id(lesson_id: str) -> dict | None:
         "server_now":      server_now,
     }
 
-def get_lesson_server_time(lesson_id: str) -> dict | None:
-    """
-    שולף end_time + approximation של NOW() מצד השרת.
-    עובד ע"י קריאת end_time ומחשב elapsed מאז start_time.
-    """
-    rows = _get("lessons", {"id": f"eq.{lesson_id}",
-                             "select": "end_time,start_time,status,is_locked"})
-    if not rows: return None
-    return rows[0]
-
 def join_lesson(lesson_id, loan_id, device_id, student_id) -> bool:
-    """מצרף מחשב לשיעור + מעדכן lesson_id בהשאלה"""
-    result = _post("lesson_participants", {
-        "lesson_id":  lesson_id,
-        "loan_id":    loan_id,
-        "device_id":  device_id,
-        "student_id": student_id,
+    """מצרף מחשב לשיעור + מעדכן lesson_id בהשאלה דרך ה-API"""
+    res = _api_post("lesson", {
+        "action": "join",
+        "lessonId": lesson_id,
+        "loanId": loan_id,
+        "deviceId": device_id,
+        "studentId": student_id
     })
-    if result:
-        _patch("device_loans", {"lesson_id": lesson_id}, {"id": f"eq.{loan_id}"})
-    return bool(result)
-
-def remove_lesson_participant(lesson_id, student_id) -> bool:
-    """מחק תלמיד מטבלת משתתפי השיעור"""
-    result = _delete("lesson_participants", {"lesson_id": f"eq.{lesson_id}", "student_id": f"eq.{student_id}"})
-    return bool(result)
-
-def clear_loan_lesson(loan_id) -> bool:
-    """אפס את מזהה השיעור (lesson_id) עבור השאלה פעילה"""
-    result = _patch("device_loans", {"lesson_id": None}, {"id": f"eq.{loan_id}"})
-    return bool(result)
+    return bool(res and res.get("success"))
 
 def disconnect_student_from_lesson(loan_id, student_id, lesson_id=None) -> bool:
-    """מנתק תלמיד משיעור באופן מאובטח באמצעות RPC בשרת"""
-    result = _rpc("disconnect_student_from_lesson", {
-        "p_loan_id": loan_id,
-        "p_student_id": student_id,
-        "p_lesson_id": lesson_id,
+    """מנתק תלמיד משיעור באופן מאובטח דרך ה-API"""
+    res = _api_post("lesson", {
+        "action": "disconnect",
+        "lessonId": lesson_id,
+        "loanId": loan_id,
+        "studentId": student_id
     })
-    return bool(result)
-
-def get_lesson_status(lesson_id: str) -> dict | None:
-    """בדיקה תקופתית של סטטוס שיעור (ל-polling fallback)"""
-    rows = _get("lessons", {"id": f"eq.{lesson_id}",
-                             "select": "status,is_locked,end_time"})
-    return rows[0] if rows else None
+    return bool(res and res.get("success"))
 
 def check_pre_assigned_lessons(national_id: str) -> list:
-    """
-    בודק האם התלמיד משויך לשיעור פעיל אחד או יותר.
-    מחזיר רשימה של שיעורים: [{lesson_id, lesson_code, subject, teacher_name, end_time, server_now, is_locked}]
-    """
-    res = _rpc("get_pre_assigned_active_lesson", {"entered_id": national_id})
-    if res and isinstance(res, list):
-        return res
+    """בודק האם התלמיד משויך לשיעור פעיל דרך ה-API"""
+    res = _api_post("lesson", {"action": "check_pre_assigned", "nationalId": national_id})
+    if res and res.get("lesson"):
+        l = res["lesson"]
+        return l if isinstance(l, list) else [l]
     return []
 
 

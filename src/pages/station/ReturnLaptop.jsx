@@ -118,46 +118,43 @@ export default function ReturnLaptop({ cart, onDone }) {
 
   async function lookupDevice(deviceIdOrNumber) {
     setErrorMsg('')
-    const isUUID = /^[0-9a-f-]{36}$/i.test(deviceIdOrNumber)
-    let dev
-    if (isUUID) {
-      const { data } = await supabase.from('devices').select('*').eq('id', deviceIdOrNumber).eq('cart_id', cart.id).single()
-      dev = data
-    } else {
-      const { data } = await supabase.from('devices').select('*').eq('cart_id', cart.id).eq('device_number', Number(deviceIdOrNumber)).single()
-      dev = data
+    try {
+      const res = await fetch('/api/station/return-laptop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartId: cart.id, deviceIdOrNumber })
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        setErrorMsg(json.error || 'מחשב לא נמצא בעגלה זו.')
+        return
+      }
+
+      setDevice(json.device)
+      setLoan(json.loan)
+      setStep(STEPS.CONFIRM)
+    } catch (err) {
+      setErrorMsg('שגיאה בחיבור לשרת: ' + err.message)
     }
-
-    if (!dev) { setErrorMsg('מחשב לא נמצא בעגלה זו.'); return }
-
-    // Find active loan
-    const { data: activeLoan } = await supabase
-      .from('device_loans')
-      .select('*, students(name, class_name)')
-      .eq('device_id', dev.id)
-      .eq('status', 'active')
-      .is('checkin_at', null)
-      .single()
-
-    if (!activeLoan) {
-      setErrorMsg(`מחשב מס' ${dev.device_number} כבר מוחזר או לא נלקח.`)
-      return
-    }
-
-    setDevice(dev)
-    setLoan(activeLoan)
-    setStep(STEPS.CONFIRM)
   }
 
   async function confirmReturn() {
-    const { error } = await supabase
-      .from('device_loans')
-      .update({ checkin_at: new Date().toISOString(), status: 'returned', return_method: 'cart_station' })
-      .eq('id', loan.id)
-
-    if (error) { setErrorMsg('שגיאה בהחזרה. נסה שנית.'); return }
-    setStep(STEPS.SUCCESS)
-    setTimeout(() => onDone(), 1500)
+    try {
+      const res = await fetch('/api/station/return-laptop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartId: cart.id, loanId: loan.id })
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        setErrorMsg(json.error || 'שגיאה בהחזרת המחשב. נסה שנית.')
+        return
+      }
+      setStep(STEPS.SUCCESS)
+      setTimeout(() => onDone(), 1500)
+    } catch (err) {
+      setErrorMsg('שגיאה בחיבור לשרת: ' + err.message)
+    }
   }
 
   function duration(from) {

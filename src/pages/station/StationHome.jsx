@@ -82,49 +82,56 @@ export default function StationHome() {
     setAuthLoading(true)
     setAuthError('')
 
-    // Fetch cart details
-    const { data: cartData, error } = await supabase
-      .from('carts')
-      .select('id, name, display_name, location, allow_manual_entry, enable_charge_tracking')
-      .eq('id', cartId)
-      .is('deleted_at', null)
-      .single()
+    try {
+      const res = await fetch('/api/station/cart-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartId })
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        setCart(null)
+        setIsAuthorized(false)
+        setAuthLoading(false)
+        setAuthError(json.error || 'עגלה לא נמצאה')
+        return
+      }
 
-    if (error || !cartData) {
-      setCart(null)
-      setIsAuthorized(false)
+      setCart(json.cart)
+      if (json.stats) {
+        setStats(json.stats)
+      }
+
+      // Check LocalStorage auth code
+      const auths = JSON.parse(localStorage.getItem('kiosk_auths') || '{}')
+      const storedCode = auths[cartId]
+
+      if (!storedCode) {
+        setIsAuthorized(false)
+        setAuthLoading(false)
+        return
+      }
+
+      // Validate the stored code via API
+      const vRes = await fetch('/api/station/verify-kiosk-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartId, code: storedCode })
+      })
+      const vJson = await vRes.json()
+      if (vJson.isValid) {
+        setIsAuthorized(true)
+      } else {
+        delete auths[cartId]
+        localStorage.setItem('kiosk_auths', JSON.stringify(auths))
+        setIsAuthorized(false)
+      }
+    } catch (err) {
+      console.error('Error loading cart:', err)
+      setAuthError('שגיאה בחיבור לשרת')
+    } finally {
       setAuthLoading(false)
-      setAuthError('עגלה לא נמצאה')
-      return
     }
-
-    setCart(cartData)
-
-    // Check LocalStorage auth code
-    const auths = JSON.parse(localStorage.getItem('kiosk_auths') || '{}')
-    const storedCode = auths[cartId]
-
-    if (!storedCode) {
-      setIsAuthorized(false)
-      setAuthLoading(false)
-      return
-    }
-
-    // Validate the stored code against the database via RPC
-    const { data: isValid } = await supabase.rpc('verify_kiosk_code', {
-      p_cart_id: cartId,
-      p_code: storedCode
-    })
-
-    if (isValid) {
-      setIsAuthorized(true)
-    } else {
-      // Stored token is invalid (changed by admin), clean up
-      delete auths[cartId]
-      localStorage.setItem('kiosk_auths', JSON.stringify(auths))
-      setIsAuthorized(false)
-    }
-    setAuthLoading(false)
   }
 
   // Realtime subscription for stats update
@@ -149,16 +156,17 @@ export default function StationHome() {
 
   async function loadStats() {
     if (!cart) return
-    const { data } = await supabase
-      .from('cart_status')
-      .select('*')
-      .eq('id', cart.id)
-      .single()
-    if (data) {
-      setStats({
-        available: data.available_devices ?? 0,
-        taken: data.active_loans ?? 0
+    try {
+      const res = await fetch('/api/station/cart-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartId: cart.id })
       })
+      const json = await res.json()
+      if (json.cart) setCart(json.cart)
+      if (json.stats) setStats(json.stats)
+    } catch (err) {
+      console.error('Error loading stats:', err)
     }
   }
 
@@ -170,30 +178,30 @@ export default function StationHome() {
     setAuthLoading(true)
     setAuthError('')
 
-    const { data: isValid, error } = await supabase.rpc('verify_kiosk_code', {
-      p_cart_id: cart.id,
-      p_code: passcode
-    })
+    try {
+      const res = await fetch('/api/station/verify-kiosk-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cartId: cart.id, code: passcode })
+      })
+      const json = await res.json()
+      if (res.ok && json.isValid) {
+        const auths = JSON.parse(localStorage.getItem('kiosk_auths') || '{}')
+        auths[cart.id] = passcode
+        localStorage.setItem('kiosk_auths', JSON.stringify(auths))
 
-    if (error) {
-      setAuthError('שגיאה בחיבור לשרת: ' + error.message)
+        setIsAuthorized(true)
+        setPasscode('')
+      } else {
+        setAuthError('קוד גישה שגוי. אנא נסה שוב.')
+        setPasscode('')
+      }
+    } catch (err) {
+      setAuthError('שגיאה בחיבור לשרת: ' + err.message)
+      setPasscode('')
+    } finally {
       setAuthLoading(false)
-      return
     }
-
-    if (isValid) {
-      // Save in localStorage
-      const auths = JSON.parse(localStorage.getItem('kiosk_auths') || '{}')
-      auths[cart.id] = passcode
-      localStorage.setItem('kiosk_auths', JSON.stringify(auths))
-
-      setIsAuthorized(true)
-      setPasscode('')
-    } else {
-      setAuthError('קוד גישה שגוי. אנא נסה שוב.')
-      setPasscode('')
-    }
-    setAuthLoading(false)
   }
 
   // Keypad click handlers

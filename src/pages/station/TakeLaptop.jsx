@@ -71,26 +71,23 @@ export default function TakeLaptop({ cart, onDone }) {
     setErrorMsg('')
     if (idValue.length < 5) { setErrorMsg('תעודת זהות חייבת להכיל לפחות 5 ספרות'); return }
 
-    // Lookup student
-    const { data: stu } = await supabase.from('students').select('*').eq('national_id', idValue).single()
-    if (!stu) { setErrorMsg('תעודת זהות לא נמצאת במערכת. פנה למורה.'); return }
+    try {
+      const res = await fetch('/api/station/take-laptop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm_id', cartId: cart.id, nationalId: idValue })
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        setErrorMsg(json.error || 'תעודת זהות לא נמצאה במערכת')
+        return
+      }
 
-    // Check if student already has active loan
-    const { data: existing } = await supabase
-      .from('device_loans')
-      .select('id, devices(device_number, carts(name, display_name))')
-      .eq('student_id', stu.id)
-      .eq('status', 'active')
-      .is('checkin_at', null)
-      .single()
-
-    if (existing) {
-      setErrorMsg(`יש לך מחשב מס' ${existing.devices?.device_number} מ${existing.devices?.carts?.display_name || existing.devices?.carts?.name} שלא הוחזר. יש להחזירו לפני לקיחת מחשב חדש.`)
-      return
+      setStudent(json.student)
+      setStep(STEPS.SCAN)
+    } catch (err) {
+      setErrorMsg('שגיאה בחיבור לשרת: ' + err.message)
     }
-
-    setStudent(stu)
-    setStep(STEPS.SCAN)
   }
 
   // QR Scanner – מצלמה קדמית (facingMode: user) לטאבלט מורכב על קיר
@@ -153,47 +150,33 @@ export default function TakeLaptop({ cart, onDone }) {
 
   async function processDevice(deviceId) {
     setErrorMsg('')
-    // deviceId is either UUID (QR) or device_number (manual)
-    let device
     const isUUID = /^[0-9a-f-]{36}$/i.test(deviceId)
-    if (isUUID) {
-      const { data } = await supabase.from('devices').select('*').eq('id', deviceId).eq('cart_id', cart.id).single()
-      device = data
-    } else {
-      const { data } = await supabase.from('devices').select('*').eq('cart_id', cart.id).eq('device_number', Number(deviceId)).single()
-      device = data
+    const payload = {
+      action: 'checkout',
+      cartId: cart.id,
+      studentId: student.id,
+      ...(isUUID ? { deviceId } : { deviceNumber: Number(deviceId) })
     }
 
-    if (!device) { setErrorMsg('מחשב לא נמצא בעגלה זו. נסה שנית.'); return }
+    try {
+      const res = await fetch('/api/station/take-laptop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        setErrorMsg(json.error || 'שגיאה ברישום ההשאלה')
+        return
+      }
 
-    // Check device has no active loan
-    const { data: activeLoan } = await supabase
-      .from('device_loans')
-      .select('id, students(name)')
-      .eq('device_id', device.id)
-      .eq('status', 'active')
-      .is('checkin_at', null)
-      .single()
+      setResult({ device: json.device, student })
+      setStep(STEPS.SUCCESS)
 
-    if (activeLoan) {
-      setErrorMsg(`מחשב זה נלקח על ידי ${activeLoan.students?.name}. יש להחזירו לפני שניתן ייקחו אותו.`)
-      return
+      setTimeout(() => onDone(), 2500)
+    } catch (err) {
+      setErrorMsg('שגיאה בחיבור לשרת: ' + err.message)
     }
-
-    // Create loan
-    const { error } = await supabase.from('device_loans').insert({
-      device_id: device.id,
-      student_id: student.id,
-      checkout_method: isUUID ? 'qr_scan' : 'manual_number',
-    })
-
-    if (error) { setErrorMsg('שגיאה ברישום. נסה שנית.'); return }
-
-    setResult({ device, student })
-    setStep(STEPS.SUCCESS)
-
-    // Auto-return after 2s
-    setTimeout(() => onDone(), 2000)
   }
 
   // ─── STEP: ID ──────────────────────────────

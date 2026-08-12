@@ -155,6 +155,7 @@ export default function TakeLaptop({ cart, onDone }) {
       action: 'checkout',
       cartId: cart.id,
       studentId: student.id,
+      checkoutMethod: scanMode === 'qr' ? 'qr_scan' : 'manual_number',
       ...(isUUID ? { deviceId } : { deviceNumber: Number(deviceId) })
     }
 

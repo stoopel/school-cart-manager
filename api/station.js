@@ -55,7 +55,7 @@ export default async function handler(req, res) {
     // Route 3: Take Laptop (Confirm ID & Checkout)
     if (targetRoute === 'take-laptop' || targetRoute === 'confirm_id' || targetRoute === 'checkout') {
       const action = body.action || targetRoute
-      const { cartId, nationalId, deviceId, deviceNumber, studentId } = body
+      const { cartId, nationalId, deviceId, deviceNumber, studentId, checkoutMethod } = body
       if (!cartId) return res.status(400).json({ error: 'cartId is required' })
 
       if (action === 'confirm_id') {
@@ -105,10 +105,12 @@ export default async function handler(req, res) {
         const { data: takenLoan } = await supabaseAdmin.from('device_loans').select('id').eq('device_id', targetDev.id).eq('status', 'active').is('checkin_at', null).single()
         if (takenLoan) return res.status(400).json({ error: `מחשב מס' ${targetDev.device_number} כבר נלקח.` })
 
+        const validMethod = (checkoutMethod === 'qr_scan' || checkoutMethod === 'manual_number') ? checkoutMethod : 'manual_number'
+
         const { data: newLoan, error: insertErr } = await supabaseAdmin.from('device_loans').insert({
           device_id: targetDev.id,
           student_id: studentId,
-          checkout_method: 'cart_station',
+          checkout_method: validMethod,
           status: 'active'
         }).select().single()
 

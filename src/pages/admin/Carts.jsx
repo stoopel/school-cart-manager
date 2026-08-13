@@ -191,23 +191,54 @@ export default function Carts() {
 
   async function addDevice(e) {
     e.preventDefault(); setError(''); setSaving(true)
-    const { error: err } = await supabase.from('devices').insert({
-      cart_id: selectedCart.id,
-      device_number: Number(deviceForm.device_number),
-      asset_tag: deviceForm.asset_tag.trim() || null,
-    })
-    setSaving(false)
-    if (err) { setError(err.message); return }
-    setShowAddDevice(false)
-    setDeviceForm({ device_number: '', asset_tag: '' })
-    loadDevices(selectedCart.id)
-    loadCarts()
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'carts',
+          action: 'save_device',
+          device: {
+            cart_id: selectedCart.id,
+            device_number: Number(deviceForm.device_number),
+            asset_tag: deviceForm.asset_tag.trim() || null,
+          }
+        })
+      })
+      const json = await res.json()
+      setSaving(false)
+      if (!res.ok || json.error) {
+        setError(json.error || 'שגיאה בשמירת המחשב')
+        return
+      }
+      setShowAddDevice(false)
+      setDeviceForm({ device_number: '', asset_tag: '' })
+      loadDevices(selectedCart.id)
+      loadCarts()
+    } catch (err) {
+      setSaving(false)
+      setError('שגיאה בחיבור לשרת: ' + err.message)
+    }
   }
 
   async function deleteDevice(id) {
     if (!confirm('למחוק מחשב זה?')) return
-    await supabase.from('devices').delete().eq('id', id)
-    loadDevices(selectedCart.id)
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: 'carts', action: 'delete_device', deviceId: id })
+      })
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        alert(json.error || 'שגיאה במחיקת המחשב')
+        return
+      }
+      loadDevices(selectedCart.id)
+      loadCarts()
+    } catch (err) {
+      alert('שגיאה בחיבור לשרת: ' + err.message)
+    }
   }
 
   async function forceReturn(loanId) {

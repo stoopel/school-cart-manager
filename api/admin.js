@@ -28,7 +28,36 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true })
       }
       if (action === 'save_device') {
-        const result = device.id ? await supabaseAdmin.from('devices').update(device).eq('id', device.id).select().single() : await supabaseAdmin.from('devices').insert(device).select().single()
+        if (!device.id) {
+          const { data: existingDeleted } = await supabaseAdmin
+            .from('devices')
+            .select('*')
+            .eq('cart_id', device.cart_id)
+            .eq('device_number', device.device_number)
+            .not('deleted_at', 'is', null)
+            .maybeSingle()
+
+          if (existingDeleted) {
+            const { data: restored, error: rErr } = await supabaseAdmin
+              .from('devices')
+              .update({
+                deleted_at: null,
+                asset_tag: device.asset_tag || null,
+                status: 'locked'
+              })
+              .eq('id', existingDeleted.id)
+              .select()
+              .single()
+
+            if (rErr) return res.status(500).json({ error: rErr.message })
+            return res.status(200).json({ device: restored })
+          }
+        }
+
+        const result = device.id
+          ? await supabaseAdmin.from('devices').update(device).eq('id', device.id).select().single()
+          : await supabaseAdmin.from('devices').insert(device).select().single()
+
         if (result.error) return res.status(500).json({ error: result.error.message })
         return res.status(200).json({ device: result.data })
       }

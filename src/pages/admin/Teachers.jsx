@@ -17,7 +17,7 @@ export default function Teachers() {
   async function load() {
     setLoading(true)
     const { data } = await supabase
-      .from('teachers').select('*').is('deleted_at', null).order('name')
+      .from('teachers').select('*').order('name')
     setTeachers(data ?? [])
     setLoading(false)
   }

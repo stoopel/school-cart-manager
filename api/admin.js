@@ -71,7 +71,7 @@ export default async function handler(req, res) {
     // ─── STUDENTS SCOPE ────────────────────────────────────────
     if (scope === 'students' || action === 'list_students' || action === 'save_student' || action === 'delete_student' || action === 'reset_strikes') {
       if (action === 'list' || action === 'list_students') {
-        const { data: students, error } = await supabaseAdmin.from('students').select('*').is('deleted_at', null).order('name')
+        const { data: students, error } = await supabaseAdmin.from('students').select('*').order('name')
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ students: students || [] })
       }
@@ -81,8 +81,11 @@ export default async function handler(req, res) {
         return res.status(200).json({ student: result.data })
       }
       if (action === 'delete' || action === 'delete_student') {
-        const { error } = await supabaseAdmin.from('students').update({ deleted_at: new Date().toISOString() }).eq('id', studentId)
-        if (error) return res.status(500).json({ error: error.message })
+        const { error } = await supabaseAdmin.from('students').delete().eq('id', studentId)
+        if (error) {
+          if (error.code === '23503') return res.status(400).json({ error: 'לא ניתן למחוק תלמיד שיש לו היסטוריית השאלות במערכת.' })
+          return res.status(500).json({ error: error.message })
+        }
         return res.status(200).json({ success: true })
       }
       if (action === 'reset_strikes') {
@@ -95,7 +98,7 @@ export default async function handler(req, res) {
     // ─── TEACHERS SCOPE ────────────────────────────────────────
     if (scope === 'teachers' || action === 'list_teachers' || action === 'save_teacher' || action === 'delete_teacher') {
       if (action === 'list' || action === 'list_teachers') {
-        const { data: teachers, error } = await supabaseAdmin.from('teachers').select('*').is('deleted_at', null).order('name')
+        const { data: teachers, error } = await supabaseAdmin.from('teachers').select('*').order('name')
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ teachers: teachers || [] })
       }
@@ -105,8 +108,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ teacher: result.data })
       }
       if (action === 'delete' || action === 'delete_teacher') {
-        const { error } = await supabaseAdmin.from('teachers').update({ deleted_at: new Date().toISOString() }).eq('id', teacherId)
-        if (error) return res.status(500).json({ error: error.message })
+        const { error } = await supabaseAdmin.from('teachers').delete().eq('id', teacherId)
+        if (error) {
+          if (error.code === '23503') {
+            await supabaseAdmin.from('teachers').update({ is_active: false }).eq('id', teacherId)
+            return res.status(200).json({ success: true, deactivated: true })
+          }
+          return res.status(500).json({ error: error.message })
+        }
         return res.status(200).json({ success: true })
       }
     }

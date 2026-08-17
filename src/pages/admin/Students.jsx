@@ -39,7 +39,7 @@ export default function Students() {
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase.from('students').select('*').is('deleted_at', null).order('class_name').order('name')
+    const { data } = await supabase.from('students').select('*').order('class_name').order('name')
     setStudents(data ?? [])
     setLoading(false)
   }

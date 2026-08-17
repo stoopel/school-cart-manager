@@ -40,13 +40,10 @@ export default async function handler(req, res) {
       const endTime = new Date(now.getTime() + durationMins * 60000)
       const lessonCode = Math.floor(1000 + Math.random() * 9000).toString()
 
-      const { data: tData } = await supabaseAdmin.from('teachers').select('name').eq('id', teacherId).single()
-
       const { data: newLesson, error } = await supabaseAdmin
         .from('lessons')
         .insert({
           teacher_id: teacherId,
-          teacher_name: tData?.name || 'מורה',
           subject: subject || 'שיעור',
           duration_minutes: durationMins,
           lesson_code: lessonCode,
@@ -55,7 +52,7 @@ export default async function handler(req, res) {
           status: 'active',
           is_locked: !!isLocked
         })
-        .select()
+        .select('*, teachers(name)')
         .single()
 
       if (error) return res.status(500).json({ error: error.message })

@@ -199,12 +199,18 @@ export default async function handler(req, res) {
       }
 
       if (action === 'join') {
-        const { data: lessonData } = await supabaseAdmin.from('lessons').select('id, end_time, status, teacher_name').eq('id', lessonId).single()
+        const { data: lessonData } = await supabaseAdmin.from('lessons').select('id, end_time, status, teachers(name)').eq('id', lessonId).single()
         if (!lessonData || lessonData.status !== 'active') return res.status(400).json({ error: 'Lesson is not active' })
 
         await supabaseAdmin.from('lesson_participants').insert({ lesson_id: lessonId, student_id: studentId, loan_id: loanId, device_id: deviceId })
         await supabaseAdmin.from('device_loans').update({ lesson_id: lessonId }).eq('id', loanId)
-        return res.status(200).json({ success: true, lesson: lessonData })
+        const formattedLesson = {
+          id: lessonData.id,
+          end_time: lessonData.end_time,
+          status: lessonData.status,
+          teacher_name: lessonData.teachers?.name || 'מורה'
+        }
+        return res.status(200).json({ success: true, lesson: formattedLesson })
       }
 
       if (action === 'disconnect') {

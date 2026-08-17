@@ -883,19 +883,10 @@ class CartAgent:
                 log.info("Charge check delta negative, but enable_charge_tracking is disabled. Skipping strike attribution.")
 
     def _attribute_strike_to_last_returner(self):
-        """מוצא את התלמיד שהחזיר אחרון ומוסיף לו strike"""
+        """מוצא את התלמיד שהחזיר אחרון ומוסיף לו strike דרך ה-API"""
         if not self.device_id: return
-        rows = db._get("device_loans", {
-            "device_id": f"eq.{self.device_id}",
-            "status":    "eq.returned",
-            "select":    "id,student_id",
-            "order":     "checkin_at.desc",
-            "limit":     "1",
-        })
-        if not rows: return
-        loan = rows[0]
-        count = db.add_charge_strike(loan["student_id"], self.device_id, loan["id"])
-        log.info(f"Strike added to student {loan['student_id']}: now {count} strikes")
+        count = db.add_charge_strike(student_id="", device_id=self.device_id, loan_id="")
+        log.info(f"Strike processed for device {self.device_id}: now {count} strikes")
 
     # ── Idle / Sleep ──────────────────────────────────────────
 

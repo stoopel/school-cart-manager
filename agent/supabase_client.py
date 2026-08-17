@@ -128,14 +128,12 @@ def get_active_loan(asset_tag):
     return loan
 
 def log_digital_login(loan_id, device_id):
-    now = datetime.utcnow().isoformat() + "Z"
-    _patch("device_loans", {"digital_login_at": now}, {"id": f"eq.{loan_id}"})
-    _patch("devices", {"status": "active", "last_seen": now}, {"id": f"eq.{device_id}"})
+    """רושם כניסה דיגיטלית של התלמיד דרך ה-API"""
+    log_event(device_id, loan_id, "digital_login")
 
 def log_digital_logout(loan_id, device_id):
-    now = datetime.utcnow().isoformat() + "Z"
-    _patch("device_loans", {"digital_logout_at": now}, {"id": f"eq.{loan_id}"})
-    _patch("devices", {"status": "locked", "last_seen": now}, {"id": f"eq.{device_id}"})
+    """רושם יציאה דיגיטלית ונעילה של המחשב דרך ה-API"""
+    log_event(device_id, loan_id, "digital_logout")
 
 def heartbeat(device_id, battery_level=None, is_charging=None):
     payload = {"deviceId": device_id}
@@ -144,17 +142,13 @@ def heartbeat(device_id, battery_level=None, is_charging=None):
     _api_post("heartbeat", payload)
 
 def save_battery_before_sleep(device_id, battery_level):
-    """שמור רמת סוללה לפני שינה – לשימוש בהשוואה בהתעוררות"""
-    now = datetime.utcnow().isoformat() + "Z"
-    _patch("devices", {"last_battery_level": battery_level,
-                        "last_battery_recorded": now},
-           {"id": f"eq.{device_id}"})
+    """שמור רמת סוללה לפני שינה דרך ה-API"""
+    _api_post("save_battery", {"deviceId": device_id, "batteryLevel": battery_level})
 
 def get_last_battery(device_id):
-    """שלוף רמת סוללה אחרונה לפני שינה מה-DB"""
-    rows = _get("devices", {"id": f"eq.{device_id}",
-                             "select": "last_battery_level,last_battery_recorded,battery_level"})
-    return rows[0] if rows else None
+    """שלוף רמת סוללה אחרונה לפני שינה מה-API"""
+    res = _api_post("get_last_battery", {"deviceId": device_id})
+    return res.get("battery") if res else None
 
 def log_event(device_id, loan_id, event_type, payload=None):
     _api_post("heartbeat", {
@@ -242,27 +236,20 @@ def check_pre_assigned_lessons(national_id: str) -> list:
 
 
 # ─── Strikes ──────────────────────────────────────────────────
-
+ 
 def add_charge_strike(student_id: str, device_id: str, loan_id: str) -> int:
-    """מוסיף strike ומחזיר את המספר החדש"""
-    rows = _get("students", {"id": f"eq.{student_id}", "select": "charge_strikes"})
-    if not rows: return 0
-    new_count = (rows[0].get("charge_strikes") or 0) + 1
-    _patch("students", {"charge_strikes": new_count}, {"id": f"eq.{student_id}"})
-    log_event(device_id, loan_id, "charge_strike_added", {"strike_count": new_count})
-    return new_count
+    """מוסיף strike דרך ה-API ומחזיר את המספר החדש"""
+    res = _api_post("add_strike", {"studentId": student_id, "deviceId": device_id, "loanId": loan_id})
+    return res.get("count", 0) if res else 0
 
 def reset_charge_strikes(student_id: str, device_id: str = None, loan_id: str = None):
-    """מאפס strikes (כשהתלמיד חיבר לחשמל)"""
-    now = datetime.utcnow().isoformat() + "Z"
-    _patch("students", {"charge_strikes": 0, "last_charged_at": now},
-           {"id": f"eq.{student_id}"})
-    if device_id:
-        log_event(device_id, loan_id, "charge_strike_reset")
+    """מאפס strikes דרך ה-API (כשהתלמיד חיבר לחשמל)"""
+    _api_post("reset_strikes", {"studentId": student_id, "deviceId": device_id, "loanId": loan_id})
 
 def get_student_strikes(student_id: str) -> int:
-    rows = _get("students", {"id": f"eq.{student_id}", "select": "charge_strikes"})
-    return rows[0].get("charge_strikes", 0) if rows else 0
+    """שולף כמות strikes דרך ה-API"""
+    res = _api_post("get_strikes", {"studentId": student_id})
+    return res.get("strikes", 0) if res else 0
 
 
 # ─── Realtime WebSocket ───────────────────────────────────────

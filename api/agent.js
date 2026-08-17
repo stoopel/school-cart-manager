@@ -227,6 +227,97 @@ export default async function handler(req, res) {
       return res.status(200).json({ device: dev, device_id: dev?.id || null })
     }
 
+    // Route 6: Battery Tracking
+    if (targetRoute === 'save_battery' || targetRoute === 'get_last_battery' || body.action === 'save_battery' || body.action === 'get_last_battery') {
+      const action = targetRoute || body.action
+      const deviceId = body.deviceId || body.device_id
+      if (!deviceId) return res.status(400).json({ error: 'deviceId is required' })
+
+      if (action === 'save_battery') {
+        const { batteryLevel } = body
+        const now = new Date().toISOString()
+        const { data, error } = await supabaseAdmin.from('devices').update({
+          last_battery_level: batteryLevel,
+          last_battery_recorded: now
+        }).eq('id', deviceId).select('id, last_battery_level, last_battery_recorded').single()
+
+        if (error) return res.status(500).json({ error: error.message })
+        return res.status(200).json({ success: true, device: data })
+      }
+
+      if (action === 'get_last_battery') {
+        const { data, error } = await supabaseAdmin.from('devices').select('last_battery_level, last_battery_recorded, battery_level').eq('id', deviceId).single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.status(200).json({ battery: data })
+      }
+    }
+
+    // Route 7: Strikes Management
+    if (targetRoute === 'add_strike' || targetRoute === 'reset_strikes' || targetRoute === 'get_strikes' || body.action === 'add_strike' || body.action === 'reset_strikes' || body.action === 'get_strikes') {
+      const action = targetRoute || body.action
+      const studentId = body.studentId || body.student_id
+      const deviceId = body.deviceId || body.device_id
+      const loanId = body.loanId || body.loan_id
+
+      if (!studentId) return res.status(400).json({ error: 'studentId is required' })
+
+      if (action === 'add_strike') {
+        let targetStudentId = studentId
+        let targetLoanId = loanId
+        if (!targetStudentId && deviceId) {
+          const { data: lastLoan } = await supabaseAdmin
+            .from('device_loans')
+            .select('id, student_id')
+            .eq('device_id', deviceId)
+            .eq('status', 'returned')
+            .order('checkin_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          if (lastLoan) {
+            targetStudentId = lastLoan.student_id
+            targetLoanId = lastLoan.id
+          }
+        }
+        if (!targetStudentId) return res.status(400).json({ error: 'studentId or deviceId with return history is required' })
+
+        const { data: stu } = await supabaseAdmin.from('students').select('charge_strikes').eq('id', targetStudentId).single()
+        const newCount = (stu?.charge_strikes || 0) + 1
+        await supabaseAdmin.from('students').update({ charge_strikes: newCount }).eq('id', targetStudentId)
+
+        if (deviceId) {
+          await supabaseAdmin.from('event_log').insert({
+            device_id: deviceId,
+            loan_id: targetLoanId || null,
+            source: 'agent',
+            event_type: 'charge_strike_added',
+            payload: { strike_count: newCount, student_id: targetStudentId }
+          })
+        }
+        return res.status(200).json({ success: true, count: newCount, student_id: targetStudentId })
+      }
+
+      if (action === 'reset_strikes') {
+        const now = new Date().toISOString()
+        await supabaseAdmin.from('students').update({ charge_strikes: 0, last_charged_at: now }).eq('id', studentId)
+
+        if (deviceId) {
+          await supabaseAdmin.from('event_log').insert({
+            device_id: deviceId,
+            loan_id: loanId || null,
+            source: 'agent',
+            event_type: 'charge_strike_reset',
+            payload: {}
+          })
+        }
+        return res.status(200).json({ success: true })
+      }
+
+      if (action === 'get_strikes') {
+        const { data: stu } = await supabaseAdmin.from('students').select('charge_strikes').eq('id', studentId).single()
+        return res.status(200).json({ strikes: stu?.charge_strikes || 0 })
+      }
+    }
+
     return res.status(400).json({ error: 'Unknown route' })
   } catch (err) {
     console.error('API agent error:', err)

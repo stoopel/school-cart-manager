@@ -489,8 +489,8 @@ class InstallerGUI:
             
             self.log(f"[*] Checking if cart '{self.cart_name}' exists in database...")
             
-            # 1. Resolve cart row by name
-            cart_res = requests.get(f"{self.sb_url}/rest/v1/carts?name=eq.{self.cart_name}&select=id", headers=headers, timeout=5, verify=False)
+            # 1. Resolve cart row by name or display_name (supports Hebrew & English)
+            cart_res = requests.get(f"{self.sb_url}/rest/v1/carts?or=(name.eq.{self.cart_name},display_name.eq.{self.cart_name})&select=id", headers=headers, timeout=5, verify=False)
             cart_uuid = None
             
             if cart_res.status_code == 200:
@@ -522,8 +522,24 @@ class InstallerGUI:
                 self.log(f"[ERROR] Failed to query carts table: Status {cart_res.status_code}")
                 return False
             
-            # 2. Register device securely using RPC
+            # 2. Register device securely via API (with fallback to RPC)
             self.log(f"[*] Registering device '{self.asset_tag}' (Number {self.device_num}) securely...")
+            
+            if self.api_base_url:
+                try:
+                    api_payload = {
+                        "endpoint": "register_device",
+                        "assetTag": self.asset_tag,
+                        "cartId": cart_uuid,
+                        "deviceNumber": int(self.device_num)
+                    }
+                    api_res = requests.post(self.api_base_url, json=api_payload, timeout=8, verify=False)
+                    if api_res.status_code == 200 and api_res.json().get("success"):
+                        self.log(f"[OK] Device successfully registered in database via API!")
+                        return True
+                except Exception as api_err:
+                    self.log(f"[*] API register fallback to RPC: {api_err}")
+
             rpc_device_payload = {
                 "p_asset_tag": self.asset_tag,
                 "p_cart_id": cart_uuid,

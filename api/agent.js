@@ -9,8 +9,74 @@ export default async function handler(req, res) {
     const body = req.body || {}
     const targetRoute = body.endpoint || body.action
 
+    // Route 0: Register Device (Secure installer registration)
+    if (targetRoute === 'register_device' || targetRoute === 'register-device') {
+      const assetTag = body.assetTag || body.asset_tag
+      const cartId = body.cartId || body.cart_id
+      const deviceNumber = parseInt(body.deviceNumber || body.device_number, 10)
+
+      if (!assetTag || !cartId || isNaN(deviceNumber)) {
+        return res.status(400).json({ error: 'assetTag, cartId, and numeric deviceNumber are required' })
+      }
+
+      // Check if device already exists under this cart with this number (even if soft-deleted)
+      let { data: dev } = await supabaseAdmin
+        .from('devices')
+        .select('*')
+        .eq('cart_id', cartId)
+        .eq('device_number', deviceNumber)
+        .maybeSingle()
+
+      if (!dev) {
+        // Check if device exists by asset_tag
+        const { data: devByTag } = await supabaseAdmin
+          .from('devices')
+          .select('*')
+          .eq('asset_tag', assetTag)
+          .maybeSingle()
+        dev = devByTag
+      }
+
+      if (dev) {
+        const { data: updated, error: uErr } = await supabaseAdmin
+          .from('devices')
+          .update({
+            asset_tag: assetTag,
+            cart_id: cartId,
+            device_number: deviceNumber,
+            status: 'locked',
+            deleted_at: null,
+            is_charging: true,
+            battery_level: 100
+          })
+          .eq('id', dev.id)
+          .select()
+          .single()
+
+        if (uErr) return res.status(500).json({ error: uErr.message })
+        return res.status(200).json({ success: true, device: updated })
+      } else {
+        const { data: inserted, error: iErr } = await supabaseAdmin
+          .from('devices')
+          .insert({
+            asset_tag: assetTag,
+            cart_id: cartId,
+            device_number: deviceNumber,
+            status: 'locked',
+            deleted_at: null,
+            is_charging: true,
+            battery_level: 100
+          })
+          .select()
+          .single()
+
+        if (iErr) return res.status(500).json({ error: iErr.message })
+        return res.status(200).json({ success: true, device: inserted })
+      }
+    }
+
     // Route 1: Active Loan
-    if (targetRoute === 'active-loan' || body.assetTag) {
+    if (targetRoute === 'active-loan' || (!targetRoute && body.assetTag)) {
       const { assetTag } = body
       if (!assetTag) return res.status(400).json({ error: 'assetTag is required' })
 
@@ -38,13 +104,8 @@ export default async function handler(req, res) {
       const s = Array.isArray(loan.students) ? loan.students[0] : loan.students
       if (!s) return res.status(200).json({ loan: null, device_id: dev.id })
 
-      let enable_tracking = true
-      const carts_data = dev.carts
-      if (carts_data) {
-        enable_tracking = Array.isArray(carts_data)
-          ? (carts_data[0]?.enable_charge_tracking ?? true)
-          : (carts_data.enable_charge_tracking ?? true)
-      }
+      const cartData = dev.carts
+      const enable_tracking = (Array.isArray(cartData) ? cartData[0]?.enable_charge_tracking : cartData?.enable_charge_tracking) ?? true
 
       const formattedLoan = {
         device_id: dev.id,
@@ -75,6 +136,14 @@ export default async function handler(req, res) {
       if (status) updateData.status = status
 
       await supabaseAdmin.from('devices').update(updateData).eq('id', deviceId)
+
+      if (eventType === 'digital_login' && loanId) {
+        await supabaseAdmin.from('device_loans').update({ digital_login_at: now }).eq('id', loanId)
+        await supabaseAdmin.from('devices').update({ status: 'active', last_seen: now }).eq('id', deviceId)
+      } else if (eventType === 'digital_logout' && loanId) {
+        await supabaseAdmin.from('device_loans').update({ digital_logout_at: now }).eq('id', loanId)
+        await supabaseAdmin.from('devices').update({ status: 'locked', last_seen: now }).eq('id', deviceId)
+      }
 
       if (eventType) {
         await supabaseAdmin.from('event_log').insert({

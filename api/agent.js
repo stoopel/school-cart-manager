@@ -22,15 +22,21 @@ export default async function handler(req, res) {
         .is('device_loans.checkin_at', null)
 
       if (devErr) return res.status(500).json({ error: devErr.message })
-      if (!devs || devs.length === 0) return res.status(200).json({ loan: null })
+      if (!devs || devs.length === 0) {
+        // Look up device directly to provide device_id for realtime websocket
+        const { data: rawDev } = await supabaseAdmin.from('devices').select('id, device_number, cart_id').eq('asset_tag', assetTag).maybeSingle()
+        return res.status(200).json({ loan: null, device_id: rawDev?.id || null })
+      }
 
       const dev = devs[0]
       const loans = dev.device_loans
-      if (!loans || !Array.isArray(loans) || loans.length === 0) return res.status(200).json({ loan: null })
+      if (!loans || !Array.isArray(loans) || loans.length === 0) {
+        return res.status(200).json({ loan: null, device_id: dev.id })
+      }
 
       const loan = loans[0]
       const s = Array.isArray(loan.students) ? loan.students[0] : loan.students
-      if (!s) return res.status(200).json({ loan: null })
+      if (!s) return res.status(200).json({ loan: null, device_id: dev.id })
 
       let enable_tracking = true
       const carts_data = dev.carts
@@ -141,6 +147,15 @@ export default async function handler(req, res) {
         const { data: resRpc } = await supabaseAdmin.rpc('get_pre_assigned_active_lesson', { entered_id: nationalId })
         return res.status(200).json({ lesson: resRpc })
       }
+    }
+
+    // Route 5: Get Device ID
+    if (targetRoute === 'get_device_id' || targetRoute === 'get_device' || body.action === 'get_device_id') {
+      const assetTag = body.assetTag || body.asset_tag
+      if (!assetTag) return res.status(400).json({ error: 'assetTag is required' })
+      const { data: dev, error: devErr } = await supabaseAdmin.from('devices').select('id, device_number, cart_id, status').eq('asset_tag', assetTag).maybeSingle()
+      if (devErr) return res.status(500).json({ error: devErr.message })
+      return res.status(200).json({ device: dev, device_id: dev?.id || null })
     }
 
     return res.status(400).json({ error: 'Unknown route' })

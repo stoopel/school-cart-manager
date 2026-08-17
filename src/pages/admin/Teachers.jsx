@@ -17,7 +17,7 @@ export default function Teachers() {
   async function load() {
     setLoading(true)
     const { data } = await supabase
-      .from('teachers').select('*').order('name')
+      .from('teachers').select('*').is('deleted_at', null).order('name')
     setTeachers(data ?? [])
     setLoading(false)
   }
@@ -50,7 +50,19 @@ export default function Teachers() {
 
   async function deleteTeacher(id) {
     if (!confirm('האם למחוק מורה זה?')) return
-    await supabase.from('teachers').delete().eq('id', id)
+    try {
+      await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'teachers',
+          action: 'delete_teacher',
+          teacherId: id
+        })
+      })
+    } catch (e) {
+      console.error('Error deleting teacher:', e)
+    }
     load()
   }
 

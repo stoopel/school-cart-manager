@@ -106,13 +106,14 @@ function LessonCard({ lesson, now, onRefresh }) {
   async function act(update) {
     setBusy(true)
     try {
-      await fetch('/api/teacher/lessons', {
+      await fetch('/api/teacher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'update_status',
           lessonId: lesson.id,
-          status: update.status || (update.is_locked ? 'active' : 'active')
+          status: update.status,
+          isLocked: update.is_locked
         })
       })
     } catch (e) {
@@ -125,17 +126,26 @@ function LessonCard({ lesson, now, onRefresh }) {
 
   async function extendLesson(minutes) {
     setBusy(true)
-    const currentEndTime = new Date(lesson.end_time)
-    const newEndTime = new Date(currentEndTime.getTime() + minutes * 60000)
-    const newDuration = (lesson.duration_minutes || 45) + minutes
-    await supabase.from('lessons')
-      .update({ 
-        end_time: newEndTime.toISOString(),
-        duration_minutes: newDuration 
+    try {
+      const currentEndTime = new Date(lesson.end_time)
+      const newEndTime = new Date(currentEndTime.getTime() + minutes * 60000)
+      const newDuration = (lesson.duration_minutes || 45) + minutes
+      await fetch('/api/teacher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_status',
+          lessonId: lesson.id,
+          endTime: newEndTime.toISOString(),
+          durationMinutes: newDuration
+        })
       })
-      .eq('id', lesson.id)
-    setBusy(false)
-    onRefresh()
+    } catch (e) {
+      console.error('Error extending lesson:', e)
+    } finally {
+      setBusy(false)
+      onRefresh()
+    }
   }
 
   const color  = isScheduled ? '#6366f1' : secRemaining < 300 ? '#f97316' : '#22c55e'

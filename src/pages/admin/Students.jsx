@@ -39,7 +39,7 @@ export default function Students() {
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase.from('students').select('*').order('class_name').order('name')
+    const { data } = await supabase.from('students').select('*').is('deleted_at', null).order('class_name').order('name')
     setStudents(data ?? [])
     setLoading(false)
   }
@@ -69,7 +69,7 @@ export default function Students() {
   const filteredStudents = students.filter(s =>
     s.name.includes(search) ||
     s.national_id.includes(search) ||
-    (s.class_name || '').includes(search)
+    (s.class_name && s.class_name.includes(search))
   )
 
   const filteredGroups = groups.filter(g =>
@@ -77,15 +77,16 @@ export default function Students() {
     (g.description || '').includes(searchGroup)
   )
 
-  async function addStudent(e) {
+  async function handleAdd(e) {
     e.preventDefault()
+    if (!form.national_id || !form.name) return
     setError('')
     setSaving(true)
     const { error: err } = await supabase.from('students').insert({
       national_id: form.national_id.trim(),
       name: form.name.trim(),
-      class_name: form.class_name.trim(),
-      grade: form.grade ? Number(form.grade) : null,
+      class_name: form.class_name.trim() || null,
+      grade: form.grade ? parseInt(form.grade) : null,
     })
     setSaving(false)
     if (err) { setError(err.message); return }
@@ -96,7 +97,19 @@ export default function Students() {
 
   async function deleteStudent(id) {
     if (!confirm('האם למחוק תלמיד זה?')) return
-    await supabase.from('students').delete().eq('id', id)
+    try {
+      await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'students',
+          action: 'delete_student',
+          studentId: id
+        })
+      })
+    } catch (e) {
+      console.error('Error deleting student:', e)
+    }
     load()
     loadGroups() // Member counts might change
     if (selectedGroup) {

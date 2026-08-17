@@ -62,10 +62,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ lesson: newLesson })
     }
 
-    // Route 4: Update Status
-    if (action === 'update_status') {
-      const updatePayload = { status }
-      if (status === 'ended') updatePayload.end_time = new Date().toISOString()
+    // Route 4: Update Status / Lock / Extension
+    if (action === 'update_status' || action === 'update_lesson') {
+      const updatePayload = {}
+      if (status) {
+        updatePayload.status = status
+        if (status === 'ended') updatePayload.end_time = new Date().toISOString()
+      }
+      if (isLocked !== undefined || body.is_locked !== undefined) {
+        updatePayload.is_locked = isLocked !== undefined ? isLocked : body.is_locked
+      }
+      if (body.endTime || body.end_time) {
+        updatePayload.end_time = body.endTime || body.end_time
+      }
+      if (body.durationMinutes || body.duration_minutes) {
+        updatePayload.duration_minutes = body.durationMinutes || body.duration_minutes
+      }
 
       const { data, error } = await supabaseAdmin.from('lessons').update(updatePayload).eq('id', lessonId).select().single()
       if (error) return res.status(500).json({ error: error.message })

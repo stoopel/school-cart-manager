@@ -89,12 +89,12 @@ export default async function handler(req, res) {
     }
 
     // Route 3: Verify ID (Teacher / Student)
-    if (targetRoute === 'verify_teacher' || targetRoute === 'verify_student' || body.nationalId) {
-      const action = targetRoute || body.action
+    if (targetRoute === 'verify-id' || targetRoute === 'verify_teacher' || targetRoute === 'verify_student' || body.nationalId) {
+      const action = body.action || targetRoute
       const { nationalId } = body
       if (!nationalId) return res.status(400).json({ error: 'nationalId is required' })
 
-      if (action === 'verify_teacher') {
+      if (action === 'verify_teacher' || action === 'verify-id') {
         const { data: resRpc, error } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: nationalId })
         if (error) return res.status(500).json({ error: error.message })
         if (resRpc && resRpc.is_valid) {

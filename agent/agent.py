@@ -215,11 +215,22 @@ class CartAgent:
                 return
 
             if not self.loan_data:
-                self.screen.root.after(0, lambda: [
-                    self.screen.set_verifying(False),
-                    self.screen.show_status("פנה לתחנת העגלה לפני השימוש.", "#f59e0b")
-                ])
-                return
+                # בדיקה חיה מול שרת ה-API למקרה שההשאלה בוצעה הרגע בקיוסק
+                live_loan = db.get_active_loan(ASSET_TAG)
+                if live_loan and live_loan != "OFFLINE":
+                    log.info(f"Live loan recovered on ID submit: {live_loan.get('loan_id')}")
+                    self.loan_data = live_loan
+                    if not self.device_id and live_loan.get("device_id"):
+                        self.device_id = live_loan["device_id"]
+                        self._start_loan_realtime(self.device_id)
+                    if self.screen:
+                        self.screen.set_loan_info(self.loan_data)
+                else:
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("פנה לתחנת העגלה לפני השימוש.", "#f59e0b")
+                    ])
+                    return
 
             # 3. זיהוי האם מדובר במורה (מעקף מורה מאובטח)
             teacher = db.is_teacher(entered)
@@ -777,6 +788,9 @@ class CartAgent:
             self._unlocked   = False
             self._lesson_data = None
             self._lesson_timer = None
+            if not self.device_id and new_loan and isinstance(new_loan, dict) and new_loan.get("device_id"):
+                self.device_id = new_loan["device_id"]
+                self._start_loan_realtime(self.device_id)
             if self.screen:
                 self.screen.set_loan_info(self.loan_data)
                 if self.loan_data:
@@ -784,9 +798,12 @@ class CartAgent:
                 else:
                     self.screen.relock("מחשב זה זמין לשימוש חדש.")
         else:
-            # If screen is locked and network status is offline, show warning
-            if not self._unlocked and self.screen and not is_connected():
-                self.screen.show_status("⚠️ מחשב זה מנותק מהאינטרנט. אנא חבר ל-Wi-Fi או הזן קוד מנהל.", "#ef4444")
+            # If screen is locked and network status is offline, show warning; else clear warning
+            if not self._unlocked and self.screen:
+                if not is_connected():
+                    self.screen.show_status("⚠️ מחשב זה מנותק מהאינטרנט. אנא חבר ל-Wi-Fi או הזן קוד מנהל.", "#ef4444")
+                else:
+                    self.screen.show_status("")
             # If the loan did not change, check if the lesson_id inside it changed
             old_lesson_id = self.loan_data.get("lesson_id") if self.loan_data else None
             new_lesson_id = new_loan.get("lesson_id") if new_loan else None

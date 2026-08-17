@@ -109,14 +109,23 @@ def _rpc(fn, params):
 # ─── מחשב ─────────────────────────────────────────────────────
 
 def get_device_id_by_asset_tag(asset_tag):
-    rows = _get("devices", {"asset_tag": f"eq.{asset_tag}", "select": "id"})
-    return rows[0]["id"] if rows else None
+    res = _api_post("get_device_id", {"assetTag": asset_tag})
+    if res and res.get("device_id"):
+        return res["device_id"]
+    try:
+        rows = _get("devices", {"asset_tag": f"eq.{asset_tag}", "select": "id"})
+        return rows[0]["id"] if rows else None
+    except Exception:
+        return None
 
 def get_active_loan(asset_tag):
     res = _api_post("active-loan", {"assetTag": asset_tag})
     if res is None:
         return "OFFLINE"
-    return res.get("loan")
+    loan = res.get("loan")
+    if loan and isinstance(loan, dict) and "device_id" not in loan and res.get("device_id"):
+        loan["device_id"] = res.get("device_id")
+    return loan
 
 def log_digital_login(loan_id, device_id):
     now = datetime.utcnow().isoformat() + "Z"

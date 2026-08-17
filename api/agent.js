@@ -125,7 +125,7 @@ export default async function handler(req, res) {
     }
 
     // Route 2: Heartbeat
-    if (targetRoute === 'heartbeat' || body.batteryLevel !== undefined || body.deviceId) {
+    if (targetRoute === 'heartbeat' || (!targetRoute && (body.batteryLevel !== undefined || body.eventType))) {
       const { deviceId, batteryLevel, isCharging, status, loanId, eventType, payload } = body
       if (!deviceId) return res.status(400).json({ error: 'deviceId is required' })
 

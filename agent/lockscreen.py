@@ -575,7 +575,8 @@ class LessonWidget(tk.Toplevel):
 class TeacherWidget(tk.Toplevel):
     """
     חלון צף מתקדם וקומפקטי למורה (שלט שליטה כיתתי).
-    מאפשר הצגת פרטי שיעור פעיל, מספר תלמידים מחוברים, הקפאה/הפשרה, הארכת זמן ונעילה.
+    מאפשר הצגת פרטי שיעור פעיל, קוד שיעור מודגש, פתיחת שיעור מהיר, כניסה אוטומטית לפורטל,
+    מספר תלמידים מחוברים, הקפאה/הפשרה, הארכת זמן ונעילה.
     """
     def __init__(self, parent_root, teacher_name: str, teacher_id: str, on_lock):
         super().__init__(parent_root)
@@ -590,13 +591,13 @@ class TeacherWidget(tk.Toplevel):
         
         self.title("Teacher Classroom Control")
         self.overrideredirect(True)
-        self.attributes("-alpha", 0.90)
+        self.attributes("-alpha", 0.92)
         self.attributes("-topmost", True)
         self.configure(bg=BG_CARD)
         self.wm_attributes("-toolwindow", True)
         
-        self.width = 330
-        self.height = 145
+        self.width = 340
+        self.height = 155
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
@@ -611,19 +612,26 @@ class TeacherWidget(tk.Toplevel):
         self.main_frame = tk.Frame(self.border_frame, bg=BG_CARD)
         self.main_frame.pack(fill="both", expand=True, padx=1, pady=1)
         
-        # Header Row: Teacher Name + Lock PC button
+        # Header Row: Lock PC button + Web Portal button + Teacher Name
         self.header_row = tk.Frame(self.main_frame, bg=BG_CARD)
         self.header_row.pack(fill="x", padx=10, pady=(6, 2))
         
         self.btn_lock_pc = tk.Button(
-            self.header_row, text="🔒 נעל מחשב", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
+            self.header_row, text="🔒 נעל", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
             bg=ERROR, fg="white", activebackground="#dc2626", activeforeground="white",
-            bd=0, padx=6, pady=2, cursor="hand2", relief="flat", command=self._confirm_lock
+            bd=0, padx=5, pady=2, cursor="hand2", relief="flat", command=self._confirm_lock
         )
-        self.btn_lock_pc.pack(side=tk.LEFT)
+        self.btn_lock_pc.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.btn_portal = tk.Button(
+            self.header_row, text="🌐 פורטל", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
+            bg="#4f46e5", fg="white", activebackground="#4338ca", activeforeground="white",
+            bd=0, padx=5, pady=2, cursor="hand2", relief="flat", command=self._open_web_portal
+        )
+        self.btn_portal.pack(side=tk.LEFT)
         
         self.lbl_teacher_title = tk.Label(
-            self.header_row, text=f"👨‍🏫 מורה: {self.teacher_name}",
+            self.header_row, text=f"👨‍🏫 {self.teacher_name}",
             font=tkfont.Font(family="Segoe UI", size=10, weight="bold"),
             bg=BG_CARD, fg=TEXT_MAIN, anchor="e", justify="right"
         )
@@ -650,10 +658,17 @@ class TeacherWidget(tk.Toplevel):
             bg=BG_CARD, fg=TEXT_DIM, anchor="e", justify="right"
         )
         self.lbl_students_count.pack(fill="x")
+
+        # Quick Create Lesson Button (shown when no active lesson)
+        self.btn_create_lesson = tk.Button(
+            self.content_frame, text="➕ פתח שיעור חדש (45 דק')", font=tkfont.Font(family="Segoe UI", size=9, weight="bold"),
+            bg=ACCENT, fg="white", activebackground="#4f46e5", activeforeground="white",
+            bd=0, padx=8, pady=4, cursor="hand2", relief="flat", command=self._quick_create_lesson
+        )
         
         # Controls Row
         self.ctrl_row = tk.Frame(self.main_frame, bg=BG_CARD)
-        self.ctrl_row.pack(fill="x", padx=8, pady=(4, 8))
+        self.ctrl_row.pack(fill="x", padx=8, pady=(2, 6))
         
         self.btn_freeze = tk.Button(
             self.ctrl_row, text="⏸️ הקפא מסכים", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
@@ -693,6 +708,28 @@ class TeacherWidget(tk.Toplevel):
         x = event.x_root - self.drag_x
         y = event.y_root - self.drag_y
         self.geometry(f"+{x}+{y}")
+
+    def _open_web_portal(self):
+        import supabase_client as db, webbrowser
+        def _bg():
+            token = db.get_teacher_portal_token(self.teacher_id)
+            api_base = db.API_BASE_URL.replace("/api/agent", "").replace("/api", "")
+            url = f"{api_base}/teacher?token={token}" if token else f"{api_base}/teacher"
+            webbrowser.open(url)
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _quick_create_lesson(self):
+        import supabase_client as db
+        self.btn_create_lesson.config(state="disabled", text="⏳ פותח שיעור...")
+        def _bg():
+            new_l = db.create_teacher_lesson(self.teacher_id, subject="שיעור", duration_minutes=45)
+            if new_l:
+                lessons = db.get_teacher_active_lessons(self.teacher_id)
+                self._active_lessons = lessons
+                self.parent_root.after(0, self._render_lessons)
+            else:
+                self.parent_root.after(0, lambda: self.btn_create_lesson.config(state="normal", text="➕ פתח שיעור חדש (45 דק')"))
+        threading.Thread(target=_bg, daemon=True).start()
         
     def _poll_loop(self):
         import supabase_client as db
@@ -713,8 +750,11 @@ class TeacherWidget(tk.Toplevel):
             self.btn_freeze.pack_forget()
             self.btn_extend.pack_forget()
             self.btn_end.pack_forget()
+            self.btn_create_lesson.config(state="normal", text="➕ פתח שיעור חדש (45 דק')")
+            self.btn_create_lesson.pack(fill="x", pady=(4, 2))
             return
             
+        self.btn_create_lesson.pack_forget()
         if self._selected_index >= len(self._active_lessons):
             self._selected_index = 0
             
@@ -725,7 +765,7 @@ class TeacherWidget(tk.Toplevel):
         part_count = len(parts) if isinstance(parts, list) else 0
         is_locked = lesson.get("is_locked", False)
         
-        self.lbl_lesson_info.config(text=f"📚 {subject} | קוד: [{code}]", fg=TEXT_NUM)
+        self.lbl_lesson_info.config(text=f"📚 {subject}  |  🔢 קוד: {code}", fg="#a5b4fc")
         self.lbl_students_count.config(text=f"👥 {part_count} תלמידים מחוברים 💻", fg=TEXT_MAIN)
         
         if is_locked:

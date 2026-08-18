@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { supabaseAdmin, setCorsHeaders } from './_supabase.js'
 
 export default async function handler(req, res) {
@@ -7,10 +8,10 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body || {}
-    const { action, nationalId, teacherId, subject, minutes, isLocked, lessonId, status } = body
+    const { action, nationalId, teacherId, subject, minutes, isLocked, lessonId, status, token } = body
 
-    // Route 1: Teacher Verify
-    if (action === 'verify' || nationalId) {
+    // Route 1: Teacher Verify (Standard ID Login)
+    if (action === 'verify' || (!action && nationalId)) {
       if (!nationalId) return res.status(400).json({ error: 'nationalId is required' })
       const { data: resRpc, error } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: nationalId })
       if (error) return res.status(500).json({ error: error.message })
@@ -76,9 +77,49 @@ export default async function handler(req, res) {
         updatePayload.duration_minutes = body.durationMinutes || body.duration_minutes
       }
 
-      const { data, error } = await supabaseAdmin.from('lessons').update(updatePayload).eq('id', lessonId).select().single()
+      const { data, error } = await supabaseAdmin.from('lessons').update(updatePayload).eq('id', lessonId).select().maybeSingle()
       if (error) return res.status(500).json({ error: error.message })
       return res.status(200).json({ lesson: data })
+    }
+
+    // Route 5: Generate Secure One-Time Auto-Login Token (60s TTL)
+    if (action === 'generate_token') {
+      if (!teacherId) return res.status(400).json({ error: 'teacherId is required' })
+      const secret = process.env.SUPABASE_SERVICE_ROLE_KEY || 'cart-manager-secret'
+      const exp = Date.now() + 60000 // 60 seconds
+      const nonce = crypto.randomBytes(8).toString('hex')
+      const payloadStr = JSON.stringify({ teacherId, exp, nonce })
+      const payloadB64 = Buffer.from(payloadStr).toString('base64url')
+      const sig = crypto.createHmac('sha256', secret).update(payloadB64).digest('base64url')
+      const oneTimeToken = `${payloadB64}.${sig}`
+      return res.status(200).json({ token: oneTimeToken })
+    }
+
+    // Route 6: Redeem Secure One-Time Auto-Login Token
+    if (action === 'redeem_token') {
+      if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token is required' })
+      const parts = token.split('.')
+      if (parts.length !== 2) return res.status(400).json({ error: 'Invalid token format' })
+      const [payloadB64, sig] = parts
+      const secret = process.env.SUPABASE_SERVICE_ROLE_KEY || 'cart-manager-secret'
+      const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('base64url')
+      if (sig !== expectedSig) {
+        return res.status(401).json({ error: 'Invalid token signature' })
+      }
+      try {
+        const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'))
+        if (Date.now() > payload.exp) {
+          return res.status(401).json({ error: 'Token expired' })
+        }
+        const { data: teacher, error } = await supabaseAdmin.from('teachers').select('id, name, is_active').eq('id', payload.teacherId).maybeSingle()
+        if (error) return res.status(500).json({ error: error.message })
+        if (!teacher || teacher.is_active === false) {
+          return res.status(404).json({ error: 'Teacher not found or inactive' })
+        }
+        return res.status(200).json({ isValid: true, teacher: { id: teacher.id, name: teacher.name } })
+      } catch (err) {
+        return res.status(400).json({ error: 'Malformed token payload' })
+      }
     }
 
     return res.status(400).json({ error: 'Unknown route' })

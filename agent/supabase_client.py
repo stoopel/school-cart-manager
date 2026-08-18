@@ -281,6 +281,41 @@ def update_teacher_lesson_status(lesson_id: str, is_locked: bool = None, duratio
         log.error(f"Error updating teacher lesson status: {e}")
     return None
 
+def create_teacher_lesson(teacher_id: str, subject: str = "שיעור", duration_minutes: int = 45, is_locked: bool = False) -> dict | None:
+    """יוצר שיעור חדש עבור המורה דרך ה-API"""
+    try:
+        api_root = API_BASE_URL.replace("/agent", "")
+        url = f"{api_root}/teacher"
+        payload = {
+            "action": "create",
+            "teacherId": teacher_id,
+            "subject": subject,
+            "minutes": duration_minutes,
+            "isLocked": is_locked
+        }
+        r = requests.post(url, json=payload, timeout=10, verify=False)
+        r.raise_for_status()
+        data = r.json()
+        if data and data.get("lesson"):
+            return data["lesson"]
+    except Exception as e:
+        log.error(f"Error creating teacher lesson: {e}")
+    return None
+
+def get_teacher_portal_token(teacher_id: str) -> str | None:
+    """שולף טוקן כניסה חד-פעמי ומאובטח (60s) לפורטל המורים"""
+    try:
+        api_root = API_BASE_URL.replace("/agent", "")
+        url = f"{api_root}/teacher"
+        r = requests.post(url, json={"action": "generate_token", "teacherId": teacher_id}, timeout=8, verify=False)
+        r.raise_for_status()
+        data = r.json()
+        if data and data.get("token"):
+            return data["token"]
+    except Exception as e:
+        log.error(f"Error generating teacher portal token: {e}")
+    return None
+
 
 # ─── Strikes ──────────────────────────────────────────────────
  

@@ -234,6 +234,38 @@ def check_pre_assigned_lessons(national_id: str) -> list:
         return l if isinstance(l, list) else [l]
     return []
 
+def get_teacher_active_lessons(teacher_id: str) -> list:
+    """שולף את כל השיעורים הפעילים של המורה דרך ה-API"""
+    try:
+        api_root = API_BASE_URL.replace("/agent", "")
+        url = f"{api_root}/teacher"
+        r = requests.post(url, json={"action": "list", "teacherId": teacher_id}, timeout=10, verify=False)
+        r.raise_for_status()
+        data = r.json()
+        if data and data.get("lessons"):
+            return [l for l in data["lessons"] if l.get("status") == "active"]
+    except Exception as e:
+        log.error(f"Error fetching teacher active lessons: {e}")
+    return []
+
+def update_teacher_lesson_status(lesson_id: str, is_locked: bool = None, duration_minutes: int = None, status: str = None) -> dict | None:
+    """מעדכן סטטוס שיעור (הקפאה/הפשרה/הארכה/סיום) דרך ה-API"""
+    try:
+        api_root = API_BASE_URL.replace("/agent", "")
+        url = f"{api_root}/teacher"
+        payload = {"action": "update_status", "lessonId": lesson_id}
+        if is_locked is not None: payload["isLocked"] = is_locked
+        if duration_minutes is not None: payload["durationMinutes"] = duration_minutes
+        if status is not None: payload["status"] = status
+        r = requests.post(url, json=payload, timeout=10, verify=False)
+        r.raise_for_status()
+        data = r.json()
+        if data and data.get("lesson"):
+            return data["lesson"]
+    except Exception as e:
+        log.error(f"Error updating teacher lesson status: {e}")
+    return None
+
 
 # ─── Strikes ──────────────────────────────────────────────────
  

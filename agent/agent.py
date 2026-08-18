@@ -237,6 +237,7 @@ class CartAgent:
             if teacher:
                 log.info(f"Teacher login bypass: {teacher['name']}")
                 self._teacher_bypass = True
+                self._teacher_info = teacher
                 if self.device_id:
                     db.log_event(self.device_id, self.loan_data["loan_id"],
                                  "teacher_login", {"name": teacher["name"]})
@@ -473,6 +474,23 @@ class CartAgent:
                 student_name=s_name,
                 class_name=c_name
             )
+        elif self._teacher_bypass:
+            teacher_id = self._teacher_info.get("id", "") if hasattr(self, "_teacher_info") and self._teacher_info else ""
+            self.screen.show_teacher_widget(
+                teacher_name=name,
+                teacher_id=teacher_id,
+                on_lock=self._on_teacher_lock
+            )
+
+    def _on_teacher_lock(self):
+        log.info("Teacher requested PC lock via floating widget.")
+        self._unlocked = False
+        self._teacher_bypass = False
+        if hasattr(self, "_teacher_info"):
+            self._teacher_info = None
+        if self.screen:
+            self.screen.hide_teacher_widget()
+            self.screen.relock("המחשב ננעל בהצלחה. 🔒")
 
     def _on_unlock(self):
         log.info("Device unlocked.")

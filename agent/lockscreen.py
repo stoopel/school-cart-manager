@@ -572,6 +572,216 @@ class LessonWidget(tk.Toplevel):
             self.lbl_timer.config(text=f"עוד {m}:{s:02d} דקות")
 
 
+class TeacherWidget(tk.Toplevel):
+    """
+    חלון צף מתקדם וקומפקטי למורה (שלט שליטה כיתתי).
+    מאפשר הצגת פרטי שיעור פעיל, מספר תלמידים מחוברים, הקפאה/הפשרה, הארכת זמן ונעילה.
+    """
+    def __init__(self, parent_root, teacher_name: str, teacher_id: str, on_lock):
+        super().__init__(parent_root)
+        self.parent_root = parent_root
+        self.teacher_name = teacher_name
+        self.teacher_id = teacher_id
+        self.on_lock = on_lock
+        
+        self._running = True
+        self._active_lessons = []
+        self._selected_index = 0
+        
+        self.title("Teacher Classroom Control")
+        self.overrideredirect(True)
+        self.attributes("-alpha", 0.90)
+        self.attributes("-topmost", True)
+        self.configure(bg=BG_CARD)
+        self.wm_attributes("-toolwindow", True)
+        
+        self.width = 330
+        self.height = 145
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        self.x = screen_width - self.width - 25
+        self.y = screen_height - self.height - 60
+        self.geometry(f"{self.width}x{self.height}+{self.x}+{self.y}")
+        
+        # Outer border frame
+        self.border_frame = tk.Frame(self, bg=ACCENT, bd=1)
+        self.border_frame.pack(fill="both", expand=True)
+        
+        self.main_frame = tk.Frame(self.border_frame, bg=BG_CARD)
+        self.main_frame.pack(fill="both", expand=True, padx=1, pady=1)
+        
+        # Header Row: Teacher Name + Lock PC button
+        self.header_row = tk.Frame(self.main_frame, bg=BG_CARD)
+        self.header_row.pack(fill="x", padx=10, pady=(6, 2))
+        
+        self.btn_lock_pc = tk.Button(
+            self.header_row, text="🔒 נעל מחשב", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
+            bg=ERROR, fg="white", activebackground="#dc2626", activeforeground="white",
+            bd=0, padx=6, pady=2, cursor="hand2", relief="flat", command=self._confirm_lock
+        )
+        self.btn_lock_pc.pack(side=tk.LEFT)
+        
+        self.lbl_teacher_title = tk.Label(
+            self.header_row, text=f"👨‍🏫 מורה: {self.teacher_name}",
+            font=tkfont.Font(family="Segoe UI", size=10, weight="bold"),
+            bg=BG_CARD, fg=TEXT_MAIN, anchor="e", justify="right"
+        )
+        self.lbl_teacher_title.pack(side=tk.RIGHT, fill="x", expand=True)
+        
+        # Divider
+        self.div = tk.Frame(self.main_frame, bg=BORDER, height=1)
+        self.div.pack(fill="x", padx=8, pady=3)
+        
+        # Content Container (Active lesson info or idle status)
+        self.content_frame = tk.Frame(self.main_frame, bg=BG_CARD)
+        self.content_frame.pack(fill="both", expand=True, padx=10, pady=2)
+        
+        self.lbl_lesson_info = tk.Label(
+            self.content_frame, text="טוען נתוני שיעור... ⏳",
+            font=tkfont.Font(family="Segoe UI", size=9, weight="bold"),
+            bg=BG_CARD, fg=TEXT_NUM, anchor="e", justify="right"
+        )
+        self.lbl_lesson_info.pack(fill="x")
+        
+        self.lbl_students_count = tk.Label(
+            self.content_frame, text="",
+            font=tkfont.Font(family="Segoe UI", size=8),
+            bg=BG_CARD, fg=TEXT_DIM, anchor="e", justify="right"
+        )
+        self.lbl_students_count.pack(fill="x")
+        
+        # Controls Row
+        self.ctrl_row = tk.Frame(self.main_frame, bg=BG_CARD)
+        self.ctrl_row.pack(fill="x", padx=8, pady=(4, 8))
+        
+        self.btn_freeze = tk.Button(
+            self.ctrl_row, text="⏸️ הקפא מסכים", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
+            bg="#3b82f6", fg="white", activebackground="#2563eb", activeforeground="white",
+            bd=0, padx=6, pady=3, cursor="hand2", relief="flat", command=self._toggle_freeze
+        )
+        self.btn_freeze.pack(side=tk.RIGHT, padx=2)
+        
+        self.btn_extend = tk.Button(
+            self.ctrl_row, text="⏱️ +15 דק'", font=tkfont.Font(family="Segoe UI", size=8),
+            bg=BG_INPUT, fg=TEXT_MAIN, activebackground="#2a3550", activeforeground=TEXT_MAIN,
+            bd=0, padx=6, pady=3, cursor="hand2", relief="flat", command=self._extend_lesson
+        )
+        self.btn_extend.pack(side=tk.RIGHT, padx=2)
+        
+        self.btn_end = tk.Button(
+            self.ctrl_row, text="⏹️ סיים שיעור", font=tkfont.Font(family="Segoe UI", size=8),
+            bg=BG_INPUT, fg="#f87171", activebackground="#2a3550", activeforeground="#f87171",
+            bd=0, padx=6, pady=3, cursor="hand2", relief="flat", command=self._confirm_end_lesson
+        )
+        self.btn_end.pack(side=tk.RIGHT, padx=2)
+        
+        # Draggable bindings
+        bind_widgets = [self, self.border_frame, self.main_frame, self.header_row, self.lbl_teacher_title, self.content_frame, self.lbl_lesson_info, self.lbl_students_count, self.ctrl_row]
+        for w in bind_widgets:
+            w.bind("<Button-1>", self.start_drag)
+            w.bind("<B1-Motion>", self.drag)
+            
+        # Start background polling
+        threading.Thread(target=self._poll_loop, daemon=True).start()
+        
+    def start_drag(self, event):
+        self.drag_x = event.x_root - self.winfo_x()
+        self.drag_y = event.y_root - self.winfo_y()
+        
+    def drag(self, event):
+        x = event.x_root - self.drag_x
+        y = event.y_root - self.drag_y
+        self.geometry(f"+{x}+{y}")
+        
+    def _poll_loop(self):
+        import supabase_client as db
+        while self._running:
+            try:
+                lessons = db.get_teacher_active_lessons(self.teacher_id) if self.teacher_id else []
+                self._active_lessons = lessons
+                self.parent_root.after(0, self._render_lessons)
+            except Exception:
+                pass
+            time.sleep(10)
+            
+    def _render_lessons(self):
+        if not self.winfo_exists(): return
+        if not self._active_lessons:
+            self.lbl_lesson_info.config(text="⚪ אין שיעור פעיל כרגע", fg=TEXT_DIM)
+            self.lbl_students_count.config(text="🟢 חיבור מורה פעיל (ללא הגבלת זמן)", fg=SUCCESS)
+            self.btn_freeze.pack_forget()
+            self.btn_extend.pack_forget()
+            self.btn_end.pack_forget()
+            return
+            
+        if self._selected_index >= len(self._active_lessons):
+            self._selected_index = 0
+            
+        lesson = self._active_lessons[self._selected_index]
+        code = lesson.get("lesson_code", "")
+        subject = lesson.get("subject", "שיעור")
+        parts = lesson.get("lesson_participants", [])
+        part_count = len(parts) if isinstance(parts, list) else 0
+        is_locked = lesson.get("is_locked", False)
+        
+        self.lbl_lesson_info.config(text=f"📚 {subject} | קוד: [{code}]", fg=TEXT_NUM)
+        self.lbl_students_count.config(text=f"👥 {part_count} תלמידים מחוברים 💻", fg=TEXT_MAIN)
+        
+        if is_locked:
+            self.btn_freeze.config(text="▶️ שחרר מסכים", bg=SUCCESS, activebackground="#16a34a")
+        else:
+            self.btn_freeze.config(text="⏸️ הקפא מסכים", bg="#3b82f6", activebackground="#2563eb")
+            
+        self.btn_freeze.pack(side=tk.RIGHT, padx=2)
+        self.btn_extend.pack(side=tk.RIGHT, padx=2)
+        self.btn_end.pack(side=tk.RIGHT, padx=2)
+        
+    def _toggle_freeze(self):
+        if not self._active_lessons: return
+        lesson = self._active_lessons[self._selected_index]
+        cur_locked = lesson.get("is_locked", False)
+        new_locked = not cur_locked
+        import supabase_client as db
+        def _bg():
+            db.update_teacher_lesson_status(lesson["id"], is_locked=new_locked)
+            lesson["is_locked"] = new_locked
+            self.parent_root.after(0, self._render_lessons)
+        threading.Thread(target=_bg, daemon=True).start()
+        
+    def _extend_lesson(self):
+        if not self._active_lessons: return
+        lesson = self._active_lessons[self._selected_index]
+        cur_mins = lesson.get("duration_minutes", 45)
+        new_mins = cur_mins + 15
+        import supabase_client as db
+        def _bg():
+            db.update_teacher_lesson_status(lesson["id"], duration_minutes=new_mins)
+            lesson["duration_minutes"] = new_mins
+            self.parent_root.after(0, self._render_lessons)
+        threading.Thread(target=_bg, daemon=True).start()
+        
+    def _confirm_end_lesson(self):
+        if not self._active_lessons: return
+        lesson = self._active_lessons[self._selected_index]
+        import supabase_client as db
+        def _bg():
+            db.update_teacher_lesson_status(lesson["id"], status="ended")
+            self._active_lessons = [l for l in self._active_lessons if l["id"] != lesson["id"]]
+            self.parent_root.after(0, self._render_lessons)
+        threading.Thread(target=_bg, daemon=True).start()
+        
+    def _confirm_lock(self):
+        self._running = False
+        if self.on_lock:
+            self.on_lock()
+        self.destroy()
+
+    def destroy(self):
+        self._running = False
+        super().destroy()
+
+
 class LockScreen:
     def __init__(self, on_unlock, config: dict):
         self.on_unlock = on_unlock
@@ -587,6 +797,7 @@ class LockScreen:
         self._wifi_timer_id = None
         self._verifying = False
         self.lesson_widget = None
+        self.teacher_widget = None
         self._on_disconnect_clicked = None
 
         self.root = tk.Tk()
@@ -1513,6 +1724,7 @@ class LockScreen:
         self.entered_id = ""
         self._verifying = False
         self.hide_lesson_widget()
+        self.hide_teacher_widget()
         def _do():
             install_keyboard_hook()
             set_task_manager_enabled(False)
@@ -1736,4 +1948,19 @@ class LockScreen:
                 self.lesson_widget.update_timer(remaining_seconds)
             except Exception:
                 pass
+
+    def show_teacher_widget(self, teacher_name: str, teacher_id: str, on_lock):
+        self.root.after(0, lambda: self._show_teacher_widget_inner(teacher_name, teacher_id, on_lock))
+
+    def _show_teacher_widget_inner(self, teacher_name: str, teacher_id: str, on_lock):
+        self.hide_teacher_widget()
+        self.teacher_widget = TeacherWidget(self.root, teacher_name, teacher_id, on_lock)
+
+    def hide_teacher_widget(self):
+        if self.teacher_widget:
+            try:
+                self.teacher_widget.destroy()
+            except Exception:
+                pass
+            self.teacher_widget = None
 

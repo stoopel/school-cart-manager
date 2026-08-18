@@ -199,7 +199,7 @@ export default async function handler(req, res) {
       }
 
       if (action === 'join') {
-        const { data: lessonData } = await supabaseAdmin.from('lessons').select('id, end_time, status, teachers(name)').eq('id', lessonId).single()
+        const { data: lessonData } = await supabaseAdmin.from('lessons').select('id, end_time, status, teachers(name)').eq('id', lessonId).maybeSingle()
         if (!lessonData || lessonData.status !== 'active') return res.status(400).json({ error: 'Lesson is not active' })
 
         await supabaseAdmin.from('lesson_participants').insert({ lesson_id: lessonId, student_id: studentId, loan_id: loanId, device_id: deviceId })
@@ -245,16 +245,16 @@ export default async function handler(req, res) {
         const { data, error } = await supabaseAdmin.from('devices').update({
           last_battery_level: batteryLevel,
           last_battery_recorded: now
-        }).eq('id', deviceId).select('id, last_battery_level, last_battery_recorded').single()
+        }).eq('id', deviceId).select('id, last_battery_level, last_battery_recorded').maybeSingle()
 
         if (error) return res.status(500).json({ error: error.message })
-        return res.status(200).json({ success: true, device: data })
+        return res.status(200).json({ success: true, device: data || null })
       }
 
       if (action === 'get_last_battery') {
-        const { data, error } = await supabaseAdmin.from('devices').select('last_battery_level, last_battery_recorded, battery_level').eq('id', deviceId).single()
+        const { data, error } = await supabaseAdmin.from('devices').select('last_battery_level, last_battery_recorded, battery_level').eq('id', deviceId).maybeSingle()
         if (error) return res.status(500).json({ error: error.message })
-        return res.status(200).json({ battery: data })
+        return res.status(200).json({ battery: data || null })
       }
     }
 

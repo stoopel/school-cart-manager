@@ -104,6 +104,7 @@ export default function ImportCenter() {
     clearMessages()
     setLoading(true)
 
+    try {
       const buf = await file.arrayBuffer()
       let wb
       if (file.name.toLowerCase().endsWith('.csv')) {

@@ -123,9 +123,24 @@ def get_active_loan(asset_tag):
     if res is None:
         return "OFFLINE"
     loan = res.get("loan")
-    if loan and isinstance(loan, dict) and "device_id" not in loan and res.get("device_id"):
-        loan["device_id"] = res.get("device_id")
-    return loan
+    if loan and isinstance(loan, dict):
+        if "device_id" not in loan and res.get("device_id"):
+            loan["device_id"] = res.get("device_id")
+        loan["registered"] = True
+        return loan
+
+    # If no active loan, check registration status
+    registered = res.get("registered", True)
+    if not registered:
+        return {"unregistered": True, "registered": False}
+
+    return {
+        "unborrowed": True,
+        "registered": True,
+        "device_id": res.get("device_id"),
+        "cart_name": res.get("cart_name", ""),
+        "device_number": res.get("device_number")
+    }
 
 def log_digital_login(loan_id, device_id):
     """רושם כניסה דיגיטלית של התלמיד דרך ה-API"""

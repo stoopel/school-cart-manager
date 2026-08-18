@@ -1621,15 +1621,27 @@ class LockScreen:
         self.lbl_status.config(text="")
         self.clear_selection_screen()
         
-        if self.loan_data:
-            name  = self.loan_data.get("student_name", "")
+        if self.loan_data and self.loan_data.get("student_name"):
+            name = self.loan_data.get("student_name", "")
             klass = self.loan_data.get("class_name", "")
             self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
             self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {name} | כיתה {klass}", fg=TEXT_DIM)
+        elif self.loan_data and self.loan_data.get("unborrowed"):
+            cart = self.loan_data.get("cart_name", "")
+            dev_num = self.loan_data.get("device_number")
+            dev_str = f"מחשב {dev_num}" if dev_num else ""
+            cart_str = f"{cart} | {dev_str}" if cart and dev_str else (cart or dev_str or "עגלת מחשבים")
+            self.lbl_title.config(text="מחשב זה ממתין להשאלה בעגלה", fg=WARNING)
+            self.lbl_subtitle.config(text=f"{cart_str} — פנה לתחנת הקיוסק להשאלה", fg=TEXT_DIM)
+        elif self.loan_data and self.loan_data.get("unregistered"):
+            asset = self.config.get("asset_tag", "")
+            asset_str = f"({asset}) " if asset else ""
+            self.lbl_title.config(text="🚫 מחשב זה אינו רשום במערכת", fg=ERROR)
+            self.lbl_subtitle.config(text=f"תג נכס {asset_str}אינו מוגדר בעגלות בית הספר.\nיש להריץ התקנה או לפנות למנהל המחשוב.", fg=TEXT_DIM)
         else:
             self.lbl_title.config(text="מחשב זה אינו רשום להשאלה", fg=WARNING)
             self.lbl_subtitle.config(text="הקש קוד מנהל לפתיחה, או פנה לקיוסק לרישום.", fg=TEXT_DIM)
-        
+
         self.btn_submit.config(state="normal")
 
     def set_verifying(self, state: bool):

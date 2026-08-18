@@ -214,10 +214,10 @@ class CartAgent:
                 ])
                 return
 
-            if not self.loan_data:
+            if not self.loan_data or not self.loan_data.get("student_name"):
                 # בדיקה חיה מול שרת ה-API למקרה שההשאלה בוצעה הרגע בקיוסק
                 live_loan = db.get_active_loan(ASSET_TAG)
-                if live_loan and live_loan != "OFFLINE":
+                if live_loan and live_loan != "OFFLINE" and live_loan.get("student_name"):
                     log.info(f"Live loan recovered on ID submit: {live_loan.get('loan_id')}")
                     self.loan_data = live_loan
                     if not self.device_id and live_loan.get("device_id"):
@@ -225,20 +225,48 @@ class CartAgent:
                         self._start_loan_realtime(self.device_id)
                     if self.screen:
                         self.screen.set_loan_info(self.loan_data)
+                elif live_loan and isinstance(live_loan, dict) and live_loan.get("unregistered"):
+                    # Check if teacher login bypass
+                    teacher = db.is_teacher(entered)
+                    if teacher:
+                        log.info(f"Teacher login bypass on unregistered device: {teacher['name']}")
+                        self._teacher_bypass = True
+                        self._teacher_info = teacher
+                        self.screen.root.after(0, lambda: [
+                            self.screen.set_verifying(False),
+                            self._do_unlock(teacher["name"])
+                        ])
+                        return
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("🚫 מחשב זה אינו רשום במערכת בית הספר.", "#ef4444")
+                    ])
+                    return
                 else:
+                    # Device is registered but unborrowed
+                    teacher = db.is_teacher(entered)
+                    if teacher:
+                        log.info(f"Teacher login bypass on unborrowed device: {teacher['name']}")
+                        self._teacher_bypass = True
+                        self._teacher_info = teacher
+                        self.screen.root.after(0, lambda: [
+                            self.screen.set_verifying(False),
+                            self._do_unlock(teacher["name"])
+                        ])
+                        return
                     self.screen.root.after(0, lambda: [
                         self.screen.set_verifying(False),
                         self.screen.show_status("פנה לתחנת העגלה לפני השימוש.", "#f59e0b")
                     ])
                     return
 
-            # 3. זיהוי האם מדובר במורה (מעקף מורה מאובטח)
+            # 3. זיהוי האם מדובר במורה (מעקף מורה מאובטח כשיש השאלה פעילה)
             teacher = db.is_teacher(entered)
             if teacher:
                 log.info(f"Teacher login bypass: {teacher['name']}")
                 self._teacher_bypass = True
                 self._teacher_info = teacher
-                if self.device_id:
+                if self.device_id and self.loan_data.get("loan_id"):
                     db.log_event(self.device_id, self.loan_data["loan_id"],
                                  "teacher_login", {"name": teacher["name"]})
                 self.screen.root.after(0, lambda: [

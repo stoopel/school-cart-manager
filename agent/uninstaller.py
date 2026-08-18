@@ -238,7 +238,7 @@ class UninstallerGUI:
                 
                 if user_sid:
                     # Access HKEY_USERS SID hive
-                    reg_path = f"{user_sid}\\Software\Microsoft\Windows NT\\CurrentVersion\\Winlogon"
+                    reg_path = rf"{user_sid}\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
                     try:
                         key = winreg.OpenKey(winreg.HKEY_USERS, reg_path, 0, winreg.KEY_ALL_ACCESS)
                         winreg.DeleteValue(key, "Shell")

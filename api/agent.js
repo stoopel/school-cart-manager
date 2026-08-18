@@ -82,35 +82,69 @@ export default async function handler(req, res) {
 
       const { data: devs, error: devErr } = await supabaseAdmin
         .from('devices')
-        .select('id, device_number, cart_id, carts(enable_charge_tracking), device_loans(id, student_id, checkout_at, digital_login_at, lesson_id, students(id, national_id, name, class_name, grade, charge_strikes))')
+        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, checkout_at, digital_login_at, lesson_id, students(id, national_id, name, class_name, grade, charge_strikes))')
         .eq('asset_tag', assetTag)
+        .is('deleted_at', null)
         .eq('device_loans.status', 'active')
         .is('device_loans.checkin_at', null)
 
       if (devErr) return res.status(500).json({ error: devErr.message })
       if (!devs || devs.length === 0) {
-        // Look up device directly to provide device_id for realtime websocket
-        const { data: rawDev } = await supabaseAdmin.from('devices').select('id, device_number, cart_id').eq('asset_tag', assetTag).maybeSingle()
-        return res.status(200).json({ loan: null, device_id: rawDev?.id || null })
+        // Look up device directly to check if it exists in DB (even without active loan)
+        const { data: rawDev } = await supabaseAdmin
+          .from('devices')
+          .select('id, device_number, cart_id, carts(name)')
+          .eq('asset_tag', assetTag)
+          .is('deleted_at', null)
+          .maybeSingle()
+
+        if (!rawDev) {
+          return res.status(200).json({ loan: null, device_id: null, registered: false })
+        }
+
+        const cartName = Array.isArray(rawDev.carts) ? rawDev.carts[0]?.name : rawDev.carts?.name
+        return res.status(200).json({
+          loan: null,
+          device_id: rawDev.id,
+          registered: true,
+          cart_name: cartName || '',
+          device_number: rawDev.device_number
+        })
       }
 
       const dev = devs[0]
       const loans = dev.device_loans
+      const cartData = dev.carts
+      const cartName = Array.isArray(cartData) ? cartData[0]?.name : cartData?.name
+      const enable_tracking = (Array.isArray(cartData) ? cartData[0]?.enable_charge_tracking : cartData?.enable_charge_tracking) ?? true
+
       if (!loans || !Array.isArray(loans) || loans.length === 0) {
-        return res.status(200).json({ loan: null, device_id: dev.id })
+        return res.status(200).json({
+          loan: null,
+          device_id: dev.id,
+          registered: true,
+          cart_name: cartName || '',
+          device_number: dev.device_number
+        })
       }
 
       const loan = loans[0]
       const s = Array.isArray(loan.students) ? loan.students[0] : loan.students
-      if (!s) return res.status(200).json({ loan: null, device_id: dev.id })
-
-      const cartData = dev.carts
-      const enable_tracking = (Array.isArray(cartData) ? cartData[0]?.enable_charge_tracking : cartData?.enable_charge_tracking) ?? true
+      if (!s) {
+        return res.status(200).json({
+          loan: null,
+          device_id: dev.id,
+          registered: true,
+          cart_name: cartName || '',
+          device_number: dev.device_number
+        })
+      }
 
       const formattedLoan = {
         device_id: dev.id,
         device_number: dev.device_number,
         cart_id: dev.cart_id,
+        cart_name: cartName || '',
         loan_id: loan.id,
         student_id: s.id,
         national_id: s.national_id,
@@ -121,7 +155,7 @@ export default async function handler(req, res) {
         enable_charge_tracking: enable_tracking,
         lesson_id: loan.lesson_id
       }
-      return res.status(200).json({ loan: formattedLoan, device_id: dev.id })
+      return res.status(200).json({ loan: formattedLoan, device_id: dev.id, registered: true })
     }
 
     // Route 2: Heartbeat

@@ -1,4 +1,4 @@
-"""
+r"""
 installer.py - Graphical Installer for CartAgent.
 Performs automatic computer name parsing, registers system configuration on Supabase,
 deploys executables to C:\Program Files\CartAgent, installs driver, and configures Shell.

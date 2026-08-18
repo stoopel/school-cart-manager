@@ -95,6 +95,7 @@ class InstallerGUI:
         # Supabase configs
         self.sb_url = self.config_template.get("supabase_url", "")
         self.sb_key = self.config_template.get("supabase_key", "")
+        self.api_base_url = self.config_template.get("api_base_url", "https://school-cart-manager.vercel.app/api/agent")
 
         # Automatically parsed computer values
         self.detected_cart_id = ""
@@ -525,7 +526,8 @@ class InstallerGUI:
             # 2. Register device securely via API (with fallback to RPC)
             self.log(f"[*] Registering device '{self.asset_tag}' (Number {self.device_num}) securely...")
             
-            if self.api_base_url:
+            api_url = getattr(self, "api_base_url", None) or "https://school-cart-manager.vercel.app/api/agent"
+            if api_url:
                 try:
                     api_payload = {
                         "endpoint": "register_device",
@@ -533,7 +535,7 @@ class InstallerGUI:
                         "cartId": cart_uuid,
                         "deviceNumber": int(self.device_num)
                     }
-                    api_res = requests.post(self.api_base_url, json=api_payload, timeout=8, verify=False)
+                    api_res = requests.post(api_url, json=api_payload, timeout=8, verify=False)
                     if api_res.status_code == 200 and api_res.json().get("success"):
                         self.log(f"[OK] Device successfully registered in database via API!")
                         return True

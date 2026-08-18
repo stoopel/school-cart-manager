@@ -180,8 +180,8 @@ export default async function handler(req, res) {
     }
 
     // Route 4: Lesson operations
-    if (targetRoute === 'get_by_code' || targetRoute === 'get_by_id' || targetRoute === 'join' || targetRoute === 'disconnect' || targetRoute === 'check_pre_assigned') {
-      const action = targetRoute
+    if (targetRoute === 'lesson' || targetRoute === 'get_by_code' || targetRoute === 'get_by_id' || targetRoute === 'join' || targetRoute === 'disconnect' || targetRoute === 'check_pre_assigned' || body.action === 'get_by_code' || body.action === 'get_by_id' || body.action === 'join' || body.action === 'disconnect' || body.action === 'check_pre_assigned') {
+      const action = (targetRoute !== 'lesson' ? targetRoute : body.action) || body.action
       const { lessonCode, lessonId, studentId, loanId, deviceId, nationalId } = body
 
       if (action === 'get_by_code') {

@@ -104,9 +104,21 @@ export default function ImportCenter() {
     clearMessages()
     setLoading(true)
 
-    try {
       const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf)
+      let wb
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        try {
+          const decoder = new TextDecoder('utf-8', { fatal: true })
+          const csvText = decoder.decode(buf)
+          wb = XLSX.read(csvText, { type: 'string' })
+        } catch {
+          const decoder = new TextDecoder('windows-1255')
+          const csvText = decoder.decode(buf)
+          wb = XLSX.read(csvText, { type: 'string' })
+        }
+      } else {
+        wb = XLSX.read(buf, { type: 'array' })
+      }
       const ws = wb.Sheets[wb.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json(ws)
 

@@ -12,6 +12,14 @@ export default async function handler(req, res) {
     const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
     const r2BucketName = process.env.R2_BUCKET_NAME || "db-backups";
 
+    // Validate CRON_SECRET if configured
+    if (process.env.CRON_SECRET) {
+      const authHeader = req.headers.authorization
+      if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+        return res.status(401).json({ error: 'Unauthorized cron invocation' })
+      }
+    }
+
     if (!supabaseUrl || !supabaseKey) {
         return res.status(500).json({ error: "Missing Supabase configuration (URL or Key)" });
     }

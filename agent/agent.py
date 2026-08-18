@@ -606,7 +606,8 @@ class CartAgent:
             if self.loan_data:
                 self.screen.relock("השיעור הסתיים. בחר או הכנס שיעור חדש.")
                 try:
-                    pre_assigned = db.get_pre_assigned_lessons(self.loan_data["student_id"])
+                    national_id = self.loan_data.get("national_id", "")
+                    pre_assigned = db.check_pre_assigned_lessons(national_id) if national_id else None
                     if pre_assigned:
                         self.screen.root.after(0, lambda: self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected))
                         return
@@ -686,7 +687,7 @@ class CartAgent:
             if not self._lesson_data:
                 return
             lesson_id = self._lesson_data["lesson_id"]
-            status_data = db.get_lesson_status(lesson_id)
+            status_data = db.get_active_lesson_by_id(lesson_id)
             if status_data:
                 status = status_data.get("status", "active")
                 is_locked = status_data.get("is_locked", False)

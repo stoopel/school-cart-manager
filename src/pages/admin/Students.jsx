@@ -98,9 +98,13 @@ export default function Students() {
   async function deleteStudent(id) {
     if (!confirm('האם למחוק תלמיד זה?')) return
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       await fetch('/api/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
         body: JSON.stringify({
           scope: 'students',
           action: 'delete_student',
@@ -170,8 +174,21 @@ export default function Students() {
     setImporting(true)
     setImportResult(null)
     try {
-      const buf  = await file.arrayBuffer()
-      const wb   = XLSX.read(buf)
+      const buf = await file.arrayBuffer()
+      let wb
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        try {
+          const decoder = new TextDecoder('utf-8', { fatal: true })
+          const csvText = decoder.decode(buf)
+          wb = XLSX.read(csvText, { type: 'string' })
+        } catch {
+          const decoder = new TextDecoder('windows-1255')
+          const csvText = decoder.decode(buf)
+          wb = XLSX.read(csvText, { type: 'string' })
+        }
+      } else {
+        wb = XLSX.read(buf, { type: 'array' })
+      }
       const ws   = wb.Sheets[wb.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json(ws)
 

@@ -51,9 +51,13 @@ export default function Teachers() {
   async function deleteTeacher(id) {
     if (!confirm('האם למחוק מורה זה?')) return
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       await fetch('/api/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
         body: JSON.stringify({
           scope: 'teachers',
           action: 'delete_teacher',

@@ -192,9 +192,13 @@ export default function Carts() {
   async function addDevice(e) {
     e.preventDefault(); setError(''); setSaving(true)
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
         body: JSON.stringify({
           scope: 'carts',
           action: 'save_device',
@@ -224,9 +228,13 @@ export default function Carts() {
   async function deleteDevice(id) {
     if (!confirm('למחוק מחשב זה?')) return
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
         body: JSON.stringify({ scope: 'carts', action: 'delete_device', deviceId: id })
       })
       const json = await res.json()

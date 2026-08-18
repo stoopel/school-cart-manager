@@ -128,7 +128,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ loans: loans || [] })
       }
       if (action === 'force_return') {
-        const { error } = await supabaseAdmin.from('device_loans').update({ checkin_at: new Date().toISOString(), status: 'returned', return_method: 'admin_forced' }).eq('id', loanId)
+        const { error } = await supabaseAdmin.from('device_loans').update({ checkin_at: new Date().toISOString(), status: 'returned', return_method: 'admin' }).eq('id', loanId)
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ success: true })
       }
@@ -139,13 +139,31 @@ export default async function handler(req, res) {
       if (!type || !Array.isArray(records)) return res.status(400).json({ error: 'type and records array are required' })
 
       if (type === 'students') {
-        const { data, error } = await supabaseAdmin.from('students').upsert(records, { onConflict: 'national_id' }).select()
+        const uniqueRecords = Object.values(
+          records.reduce((acc, r) => {
+            if (r.national_id) {
+              const cleanId = String(r.national_id).trim()
+              acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
+            }
+            return acc
+          }, {})
+        )
+        const { data, error } = await supabaseAdmin.from('students').upsert(uniqueRecords, { onConflict: 'national_id' }).select()
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ success: true, count: data?.length || 0 })
       }
 
       if (type === 'teachers') {
-        const { data, error } = await supabaseAdmin.from('teachers').upsert(records, { onConflict: 'national_id' }).select()
+        const uniqueRecords = Object.values(
+          records.reduce((acc, r) => {
+            if (r.national_id) {
+              const cleanId = String(r.national_id).trim()
+              acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
+            }
+            return acc
+          }, {})
+        )
+        const { data, error } = await supabaseAdmin.from('teachers').upsert(uniqueRecords, { onConflict: 'national_id' }).select()
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ success: true, count: data?.length || 0 })
       }

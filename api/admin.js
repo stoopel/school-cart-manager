@@ -149,8 +149,8 @@ export default async function handler(req, res) {
           }, {})
         )
         const { data, error } = await supabaseAdmin.from('students').upsert(uniqueRecords, { onConflict: 'national_id' }).select()
-        if (error) return res.status(500).json({ error: error.message })
-        return res.status(200).json({ success: true, count: data?.length || 0 })
+        if (error) return res.status(500).json({ error: error.message, unique_count: uniqueRecords.length })
+        return res.status(200).json({ success: true, count: data?.length || 0, unique_count: uniqueRecords.length })
       }
 
       if (type === 'teachers') {

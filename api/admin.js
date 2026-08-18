@@ -142,7 +142,7 @@ export default async function handler(req, res) {
         const uniqueRecords = Object.values(
           records.reduce((acc, r) => {
             if (r.national_id) {
-              const cleanId = String(r.national_id).trim()
+              const cleanId = String(r.national_id).trim().padStart(9, '0')
               acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
             }
             return acc
@@ -157,7 +157,7 @@ export default async function handler(req, res) {
         const uniqueRecords = Object.values(
           records.reduce((acc, r) => {
             if (r.national_id) {
-              const cleanId = String(r.national_id).trim()
+              const cleanId = String(r.national_id).trim().padStart(9, '0')
               acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
             }
             return acc

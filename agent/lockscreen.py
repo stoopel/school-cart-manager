@@ -398,57 +398,77 @@ def remove_tray_icon():
 
 
 class LessonWidget(tk.Toplevel):
+    """
+    חלונית צפה לתלמיד בזמן שיעור פעיל.
+    תומכת במצב מלא (בפינה הימנית-תחתונה) ובמצב קפסולה עליונה דקיקה (Dynamic Island).
+    """
     def __init__(self, parent_root, subject, teacher_name, end_time_str, on_disconnect, student_name="", class_name=""):
         super().__init__(parent_root)
         self.parent_root = parent_root
-        self.subject = subject
-        self.teacher_name = teacher_name
-        self.student_name = student_name
-        self.class_name = class_name
+        self.subject = subject or "שיעור"
+        self.teacher_name = teacher_name or ""
+        self.end_time_str = end_time_str or ""
+        self.student_name = student_name or ""
+        self.class_name = class_name or ""
         self.on_disconnect = on_disconnect
+        
+        self.is_minimized = False
+        self._last_remaining_sec = None
         
         self.title("Lesson Widget")
         self.overrideredirect(True)
-        self.attributes("-alpha", 0.75)
+        self.attributes("-alpha", 0.90)
         self.attributes("-topmost", True)
         self.configure(bg=BG_CARD)
-        
-        # Don't show in taskbar
         self.wm_attributes("-toolwindow", True)
         
-        # Dimensions & position
-        self.width = 280
-        self.height = 80
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
-        # Place initially at bottom-right (above standard taskbar height)
-        self.x = screen_width - self.width - 25
-        self.y = screen_height - self.height - 60
-        self.geometry(f"{self.width}x{self.height}+{self.x}+{self.y}")
+        # Dimensions & positions
+        self.full_width = 280
+        self.full_height = 80
+        self.full_x = screen_width - self.full_width - 25
+        self.full_y = screen_height - self.full_height - 60
+        
+        self.capsule_width = 280
+        self.capsule_height = 28
+        self.capsule_x = (screen_width - self.capsule_width) // 2
+        self.capsule_y = 4
+        
+        self.geometry(f"{self.full_width}x{self.full_height}+{self.full_x}+{self.full_y}")
         
         # Outer border frame
         self.border_frame = tk.Frame(self, bg=BORDER, bd=1)
         self.border_frame.pack(fill="both", expand=True)
         
-        self.main_frame = tk.Frame(self.border_frame, bg=BG_CARD)
-        self.main_frame.pack(fill="both", expand=True, padx=1, pady=1)
+        # ── 1. Full Mode Frame ────────────────────────────
+        self.full_frame = tk.Frame(self.border_frame, bg=BG_CARD)
+        self.full_frame.pack(fill="both", expand=True, padx=1, pady=1)
         
-        left_box = tk.Frame(self.main_frame, bg=BG_CARD)
-        left_box.pack(side=tk.LEFT, fill="y", padx=10)
+        left_box = tk.Frame(self.full_frame, bg=BG_CARD)
+        left_box.pack(side=tk.LEFT, fill="y", padx=6)
         
-        # Small disconnect button in Hebrew: "התנתק"
+        # Minimize button
+        self.btn_min = tk.Button(
+            left_box, text="➖", font=tkfont.Font(family="Segoe UI", size=7, weight="bold"),
+            bg=BG_INPUT, fg=TEXT_DIM, activebackground="#2a3550", activeforeground=TEXT_MAIN,
+            bd=0, padx=4, pady=1, cursor="hand2", relief="flat", command=self.minimize
+        )
+        self.btn_min.pack(anchor="nw", pady=(2, 4))
+        
+        # Disconnect button: "התנתק"
         self.btn_disconnect = tk.Button(
-            left_box, text="התנתק", font=tkfont.Font(family="Segoe UI", size=10, weight="bold"),
+            left_box, text="התנתק", font=tkfont.Font(family="Segoe UI", size=9, weight="bold"),
             bg=ERROR, fg="white", activebackground="#dc2626", activeforeground="white",
-            bd=0, padx=8, pady=4, cursor="hand2", command=self._confirm_disconnect,
+            bd=0, padx=6, pady=3, cursor="hand2", command=self._confirm_disconnect,
             relief="flat"
         )
         self.btn_disconnect.pack(expand=True)
         
         # Info container
-        right_box = tk.Frame(self.main_frame, bg=BG_CARD)
-        right_box.pack(side=tk.RIGHT, fill="both", expand=True, padx=(0, 12), pady=6)
+        right_box = tk.Frame(self.full_frame, bg=BG_CARD)
+        right_box.pack(side=tk.RIGHT, fill="both", expand=True, padx=(0, 8), pady=4)
         
         font_student = tkfont.Font(family="Segoe UI", size=9, weight="bold")
         font_sub = tkfont.Font(family="Segoe UI", size=10, weight="bold")
@@ -456,7 +476,7 @@ class LessonWidget(tk.Toplevel):
         
         student_txt = f"תלמיד: {self.student_name}" if self.student_name else ""
         if self.class_name:
-            student_txt += f" | כיתה {self.class_name}" if not student_txt else f" ({self.class_name})"
+            student_txt += f" ({self.class_name})"
             
         if student_txt:
             self.lbl_student = tk.Label(
@@ -480,8 +500,44 @@ class LessonWidget(tk.Toplevel):
         )
         self.lbl_timer.pack(fill="x", anchor="e")
         
-        # Draggable bindings (using absolute mouse coordinates to prevent jitter)
-        bind_widgets = [self, self.border_frame, self.main_frame, left_box, right_box, self.lbl_info, self.lbl_timer]
+        # ── 2. Capsule Mode Frame (Top Island) ────────────
+        self.capsule_frame = tk.Frame(self.border_frame, bg=BG_CARD, cursor="hand2")
+        
+        font_capsule_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        font_capsule = tkfont.Font(family="Segoe UI", size=9)
+        
+        self.lbl_capsule_expand = tk.Label(
+            self.capsule_frame, text="⛶", font=font_capsule_bold,
+            bg=BG_CARD, fg=TEXT_DIM, cursor="hand2"
+        )
+        self.lbl_capsule_expand.pack(side=tk.LEFT, padx=(6, 4))
+        
+        self.lbl_capsule_timer = tk.Label(
+            self.capsule_frame, text="⏱️ עוד --:--",
+            font=font_capsule_bold, bg=BG_CARD, fg="#38bdf8", cursor="hand2"
+        )
+        self.lbl_capsule_timer.pack(side=tk.LEFT, padx=4)
+        
+        self.lbl_capsule_dot = tk.Label(
+            self.capsule_frame, text="•", font=font_capsule,
+            bg=BG_CARD, fg=BORDER, cursor="hand2"
+        )
+        self.lbl_capsule_dot.pack(side=tk.LEFT, padx=2)
+        
+        self.lbl_capsule_name = tk.Label(
+            self.capsule_frame, text=f"👤 {self.student_name or 'תלמיד'}",
+            font=font_capsule, bg=BG_CARD, fg=TEXT_MAIN, anchor="e", justify="right", cursor="hand2"
+        )
+        self.lbl_capsule_name.pack(side=tk.RIGHT, fill="x", expand=True, padx=(4, 8))
+        
+        # Click anywhere on capsule to expand
+        capsule_widgets = [self.capsule_frame, self.lbl_capsule_expand, self.lbl_capsule_timer, self.lbl_capsule_dot, self.lbl_capsule_name]
+        for w in capsule_widgets:
+            w.bind("<Button-1>", lambda e: self.expand())
+            w.bind("<B1-Motion>", self.drag)
+            
+        # Draggable bindings for full frame
+        bind_widgets = [self, self.border_frame, self.full_frame, left_box, right_box, self.lbl_info, self.lbl_timer]
         if self.lbl_student:
             bind_widgets.append(self.lbl_student)
             
@@ -489,6 +545,26 @@ class LessonWidget(tk.Toplevel):
             w.bind("<Button-1>", self.start_drag)
             w.bind("<B1-Motion>", self.drag)
             
+    def minimize(self):
+        if self.is_minimized: return
+        self.full_x = self.winfo_x()
+        self.full_y = self.winfo_y()
+        self.is_minimized = True
+        self.full_frame.pack_forget()
+        self.capsule_frame.pack(fill="both", expand=True)
+        self.geometry(f"{self.capsule_width}x{self.capsule_height}+{self.capsule_x}+{self.capsule_y}")
+        self._refresh_timer_display()
+
+    def expand(self):
+        if not self.is_minimized: return
+        self.capsule_x = self.winfo_x()
+        self.capsule_y = self.winfo_y()
+        self.is_minimized = False
+        self.capsule_frame.pack_forget()
+        self.full_frame.pack(fill="both", expand=True, padx=1, pady=1)
+        self.geometry(f"{self.full_width}x{self.full_height}+{self.full_x}+{self.full_y}")
+        self._refresh_timer_display()
+        
     def start_drag(self, event):
         self.drag_x = event.x_root - self.winfo_x()
         self.drag_y = event.y_root - self.winfo_y()
@@ -497,6 +573,12 @@ class LessonWidget(tk.Toplevel):
         x = event.x_root - self.drag_x
         y = event.y_root - self.drag_y
         self.geometry(f"+{x}+{y}")
+        if self.is_minimized:
+            self.capsule_x = x
+            self.capsule_y = y
+        else:
+            self.full_x = x
+            self.full_y = y
 
     def _confirm_disconnect(self):
         confirm_win = tk.Toplevel(self)
@@ -507,11 +589,10 @@ class LessonWidget(tk.Toplevel):
         
         w = 300
         h = 135
-        # Center relative to parent widget
-        x = self.winfo_x() - (w - self.width) // 2
-        y = self.winfo_y() - h - 10
+        x = self.winfo_x() - (w - (self.capsule_width if self.is_minimized else self.full_width)) // 2
+        y = self.winfo_y() + 35 if self.is_minimized else self.winfo_y() - h - 10
         if x < 0: x = 10
-        if y < 0: y = self.winfo_y() + self.height + 10
+        if y < 0: y = 10
         confirm_win.geometry(f"{w}x{h}+{x}+{y}")
         
         border = tk.Frame(confirm_win, bg=BORDER, bd=1)
@@ -559,22 +640,34 @@ class LessonWidget(tk.Toplevel):
         btn_no.pack(side=tk.RIGHT, fill="x", expand=True, padx=(5, 0))
 
     def update_timer(self, remaining_seconds):
+        self._last_remaining_sec = remaining_seconds
+        self._refresh_timer_display()
+
+    def _refresh_timer_display(self):
+        remaining_seconds = self._last_remaining_sec
         if remaining_seconds is None or remaining_seconds < 0:
             self.lbl_timer.config(text="")
+            self.lbl_capsule_timer.config(text="⏱️ עוד --:--", fg=TEXT_DIM)
             return
             
         if remaining_seconds > 180:
             mins = int((remaining_seconds + 59) // 60)
-            self.lbl_timer.config(text=f"עוד {mins} דקות")
+            txt = f"עוד {mins} דקות"
+            color = "#38bdf8"
         else:
             m = int(remaining_seconds // 60)
             s = int(remaining_seconds % 60)
-            self.lbl_timer.config(text=f"עוד {m}:{s:02d} דקות")
+            txt = f"עוד {m}:{s:02d} דקות"
+            color = "#f87171"
+            
+        self.lbl_timer.config(text=txt)
+        self.lbl_capsule_timer.config(text=f"⏱️ {txt}", fg=color)
 
 
 class TeacherWidget(tk.Toplevel):
     """
     חלון צף מתקדם וקומפקטי למורה (שלט שליטה כיתתי).
+    תומך במצב מלא (בפינה) ובמצב קפסולה עליונה דקיקה (Dynamic Island).
     מאפשר הצגת פרטי שיעור פעיל, קוד שיעור מודגש, פתיחת שיעור מהיר, כניסה אוטומטית לפורטל,
     מספר תלמידים מחוברים, הקפאה/הפשרה, הארכת זמן ונעילה.
     """
@@ -588,6 +681,7 @@ class TeacherWidget(tk.Toplevel):
         self._running = True
         self._active_lessons = []
         self._selected_index = 0
+        self.is_minimized = False
         
         self.title("Teacher Classroom Control")
         self.overrideredirect(True)
@@ -596,25 +690,40 @@ class TeacherWidget(tk.Toplevel):
         self.configure(bg=BG_CARD)
         self.wm_attributes("-toolwindow", True)
         
-        self.width = 340
-        self.height = 155
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
-        self.x = screen_width - self.width - 25
-        self.y = screen_height - self.height - 60
-        self.geometry(f"{self.width}x{self.height}+{self.x}+{self.y}")
+        # Dimensions & positions
+        self.full_width = 340
+        self.full_height = 155
+        self.full_x = screen_width - self.full_width - 25
+        self.full_y = screen_height - self.full_height - 60
+        
+        self.capsule_width = 340
+        self.capsule_height = 28
+        self.capsule_x = (screen_width - self.capsule_width) // 2
+        self.capsule_y = 4
+        
+        self.geometry(f"{self.full_width}x{self.full_height}+{self.full_x}+{self.full_y}")
         
         # Outer border frame
         self.border_frame = tk.Frame(self, bg=ACCENT, bd=1)
         self.border_frame.pack(fill="both", expand=True)
         
+        # ── 1. Full Mode Frame ────────────────────────────
         self.main_frame = tk.Frame(self.border_frame, bg=BG_CARD)
         self.main_frame.pack(fill="both", expand=True, padx=1, pady=1)
         
-        # Header Row: Lock PC button + Web Portal button + Teacher Name
+        # Header Row: Minimize + Lock PC + Web Portal + Teacher Name
         self.header_row = tk.Frame(self.main_frame, bg=BG_CARD)
         self.header_row.pack(fill="x", padx=10, pady=(6, 2))
+        
+        self.btn_min = tk.Button(
+            self.header_row, text="➖", font=tkfont.Font(family="Segoe UI", size=7, weight="bold"),
+            bg=BG_INPUT, fg=TEXT_DIM, activebackground="#2a3550", activeforeground=TEXT_MAIN,
+            bd=0, padx=4, pady=2, cursor="hand2", relief="flat", command=self.minimize
+        )
+        self.btn_min.pack(side=tk.LEFT, padx=(0, 4))
         
         self.btn_lock_pc = tk.Button(
             self.header_row, text="🔒 נעל", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
@@ -691,7 +800,47 @@ class TeacherWidget(tk.Toplevel):
         )
         self.btn_end.pack(side=tk.RIGHT, padx=2)
         
-        # Draggable bindings
+        # ── 2. Capsule Mode Frame (Top Island) ────────────
+        self.capsule_frame = tk.Frame(self.border_frame, bg=BG_CARD, cursor="hand2")
+        
+        font_cap_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        font_cap = tkfont.Font(family="Segoe UI", size=9)
+        
+        self.lbl_cap_expand = tk.Label(
+            self.capsule_frame, text="⛶", font=font_cap_bold,
+            bg=BG_CARD, fg=TEXT_DIM, cursor="hand2"
+        )
+        self.lbl_cap_expand.pack(side=tk.LEFT, padx=(6, 4))
+        
+        self.btn_cap_create = tk.Button(
+            self.capsule_frame, text="➕ פתח שיעור", font=tkfont.Font(family="Segoe UI", size=8, weight="bold"),
+            bg=ACCENT, fg="white", activebackground="#4f46e5", activeforeground="white",
+            bd=0, padx=6, pady=1, cursor="hand2", relief="flat", command=self._quick_create_lesson
+        )
+        
+        self.lbl_cap_code = tk.Label(
+            self.capsule_frame, text="",
+            font=font_cap_bold, bg=BG_CARD, fg="#a5b4fc", cursor="hand2"
+        )
+        
+        self.lbl_cap_dot = tk.Label(
+            self.capsule_frame, text="•", font=font_cap,
+            bg=BG_CARD, fg=BORDER, cursor="hand2"
+        )
+        
+        self.lbl_cap_teacher = tk.Label(
+            self.capsule_frame, text=f"👨‍🏫 {self.teacher_name}",
+            font=font_cap, bg=BG_CARD, fg=TEXT_MAIN, anchor="e", justify="right", cursor="hand2"
+        )
+        self.lbl_cap_teacher.pack(side=tk.RIGHT, fill="x", expand=True, padx=(4, 8))
+        
+        # Click on capsule elements to expand
+        cap_binds = [self.capsule_frame, self.lbl_cap_expand, self.lbl_cap_code, self.lbl_cap_dot, self.lbl_cap_teacher]
+        for w in cap_binds:
+            w.bind("<Button-1>", lambda e: self.expand())
+            w.bind("<B1-Motion>", self.drag)
+            
+        # Draggable bindings for full frame
         bind_widgets = [self, self.border_frame, self.main_frame, self.header_row, self.lbl_teacher_title, self.content_frame, self.lbl_lesson_info, self.lbl_students_count, self.ctrl_row]
         for w in bind_widgets:
             w.bind("<Button-1>", self.start_drag)
@@ -700,6 +849,26 @@ class TeacherWidget(tk.Toplevel):
         # Start background polling
         threading.Thread(target=self._poll_loop, daemon=True).start()
         
+    def minimize(self):
+        if self.is_minimized: return
+        self.full_x = self.winfo_x()
+        self.full_y = self.winfo_y()
+        self.is_minimized = True
+        self.main_frame.pack_forget()
+        self.capsule_frame.pack(fill="both", expand=True)
+        self.geometry(f"{self.capsule_width}x{self.capsule_height}+{self.capsule_x}+{self.capsule_y}")
+        self._render_lessons()
+
+    def expand(self):
+        if not self.is_minimized: return
+        self.capsule_x = self.winfo_x()
+        self.capsule_y = self.winfo_y()
+        self.is_minimized = False
+        self.capsule_frame.pack_forget()
+        self.main_frame.pack(fill="both", expand=True, padx=1, pady=1)
+        self.geometry(f"{self.full_width}x{self.full_height}+{self.full_x}+{self.full_y}")
+        self._render_lessons()
+
     def start_drag(self, event):
         self.drag_x = event.x_root - self.winfo_x()
         self.drag_y = event.y_root - self.winfo_y()
@@ -708,6 +877,12 @@ class TeacherWidget(tk.Toplevel):
         x = event.x_root - self.drag_x
         y = event.y_root - self.drag_y
         self.geometry(f"+{x}+{y}")
+        if self.is_minimized:
+            self.capsule_x = x
+            self.capsule_y = y
+        else:
+            self.full_x = x
+            self.full_y = y
 
     def _open_web_portal(self):
         import supabase_client as db, webbrowser
@@ -721,6 +896,7 @@ class TeacherWidget(tk.Toplevel):
     def _quick_create_lesson(self):
         import supabase_client as db
         self.btn_create_lesson.config(state="disabled", text="⏳ פותח שיעור...")
+        self.btn_cap_create.config(state="disabled", text="⏳ פותח...")
         def _bg():
             new_l = db.create_teacher_lesson(self.teacher_id, subject="שיעור", duration_minutes=45)
             if new_l:
@@ -728,7 +904,10 @@ class TeacherWidget(tk.Toplevel):
                 self._active_lessons = lessons
                 self.parent_root.after(0, self._render_lessons)
             else:
-                self.parent_root.after(0, lambda: self.btn_create_lesson.config(state="normal", text="➕ פתח שיעור חדש (45 דק')"))
+                self.parent_root.after(0, lambda: [
+                    self.btn_create_lesson.config(state="normal", text="➕ פתח שיעור חדש (45 דק')"),
+                    self.btn_cap_create.config(state="normal", text="➕ פתח שיעור")
+                ])
         threading.Thread(target=_bg, daemon=True).start()
         
     def _poll_loop(self):
@@ -745,6 +924,7 @@ class TeacherWidget(tk.Toplevel):
     def _render_lessons(self):
         if not self.winfo_exists(): return
         if not self._active_lessons:
+            # Full frame idle state
             self.lbl_lesson_info.config(text="⚪ אין שיעור פעיל כרגע", fg=TEXT_DIM)
             self.lbl_students_count.config(text="🟢 חיבור מורה פעיל (ללא הגבלת זמן)", fg=SUCCESS)
             self.btn_freeze.pack_forget()
@@ -752,9 +932,17 @@ class TeacherWidget(tk.Toplevel):
             self.btn_end.pack_forget()
             self.btn_create_lesson.config(state="normal", text="➕ פתח שיעור חדש (45 דק')")
             self.btn_create_lesson.pack(fill="x", pady=(4, 2))
+            
+            # Capsule frame idle state
+            self.lbl_cap_code.pack_forget()
+            self.lbl_cap_dot.pack_forget()
+            self.btn_cap_create.config(state="normal", text="➕ פתח שיעור")
+            self.btn_cap_create.pack(side=tk.LEFT, padx=4)
             return
             
         self.btn_create_lesson.pack_forget()
+        self.btn_cap_create.pack_forget()
+        
         if self._selected_index >= len(self._active_lessons):
             self._selected_index = 0
             
@@ -765,6 +953,7 @@ class TeacherWidget(tk.Toplevel):
         part_count = len(parts) if isinstance(parts, list) else 0
         is_locked = lesson.get("is_locked", False)
         
+        # Full frame active lesson
         self.lbl_lesson_info.config(text=f"📚 {subject}  |  🔢 קוד: {code}", fg="#a5b4fc")
         self.lbl_students_count.config(text=f"👥 {part_count} תלמידים מחוברים 💻", fg=TEXT_MAIN)
         
@@ -776,6 +965,11 @@ class TeacherWidget(tk.Toplevel):
         self.btn_freeze.pack(side=tk.RIGHT, padx=2)
         self.btn_extend.pack(side=tk.RIGHT, padx=2)
         self.btn_end.pack(side=tk.RIGHT, padx=2)
+        
+        # Capsule frame active lesson
+        self.lbl_cap_code.config(text=f"🔢 {code}  ({part_count}👥)")
+        self.lbl_cap_code.pack(side=tk.LEFT, padx=4)
+        self.lbl_cap_dot.pack(side=tk.LEFT, padx=2)
         
     def _toggle_freeze(self):
         if not self._active_lessons: return

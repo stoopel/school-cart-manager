@@ -956,6 +956,35 @@ function TeacherLogin({ onLogin }) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // Check for one-time login token in URL query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
+    if (token) {
+      // Clean URL immediately so token is never saved in browser history
+      window.history.replaceState({}, '', window.location.pathname)
+      setLoading(true)
+      fetch('/api/teacher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'redeem_token', token })
+      })
+        .then(r => r.json())
+        .then(json => {
+          setLoading(false)
+          if (json.isValid && json.teacher) {
+            onLogin({ id: json.teacher.id, name: json.teacher.name, national_id: json.teacher.national_id })
+          } else {
+            setError(json.error || 'אסימון הכניסה פג תוקף או שאינו תקין.')
+          }
+        })
+        .catch(err => {
+          setLoading(false)
+          setError('שגיאה בחיבור לשרת: ' + err.message)
+        })
+    }
+  }, [onLogin])
+
   async function submit(e) {
     e.preventDefault()
     setError(''); setLoading(true)

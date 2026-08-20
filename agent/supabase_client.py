@@ -250,7 +250,7 @@ def check_pre_assigned_lessons(national_id: str) -> list:
     return []
 
 def get_teacher_active_lessons(teacher_id: str) -> list:
-    """שולף את כל השיעורים הפעילים של המורה דרך ה-API"""
+    """שולף את כל השיעורים הפעילים של המורה דרך ה-API (מוודא שזמן השיעור טרם חלף)"""
     try:
         api_root = API_BASE_URL.replace("/agent", "")
         url = f"{api_root}/teacher"
@@ -258,7 +258,15 @@ def get_teacher_active_lessons(teacher_id: str) -> list:
         r.raise_for_status()
         data = r.json()
         if data and data.get("lessons"):
-            return [l for l in data["lessons"] if l.get("status") == "active"]
+            now_iso = datetime.utcnow().isoformat()
+            active_list = []
+            for l in data["lessons"]:
+                if l.get("status") == "active":
+                    end_t = l.get("end_time")
+                    if end_t and str(end_t).replace("Z", "") < now_iso:
+                        continue
+                    active_list.append(l)
+            return active_list
     except Exception as e:
         log.error(f"Error fetching teacher active lessons: {e}")
     return []

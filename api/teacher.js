@@ -31,7 +31,14 @@ export default async function handler(req, res) {
         .limit(30)
 
       if (error) return res.status(500).json({ error: error.message })
-      return res.status(200).json({ lessons: data || [] })
+      const now = new Date()
+      const lessons = (data || []).map(l => {
+        if (l.status === 'active' && new Date(l.end_time) <= now) {
+          return { ...l, status: 'ended' }
+        }
+        return l
+      })
+      return res.status(200).json({ lessons })
     }
 
     // Route 3: Create Lesson
@@ -111,12 +118,12 @@ export default async function handler(req, res) {
         if (Date.now() > payload.exp) {
           return res.status(401).json({ error: 'Token expired' })
         }
-        const { data: teacher, error } = await supabaseAdmin.from('teachers').select('id, name, is_active').eq('id', payload.teacherId).maybeSingle()
+        const { data: teacher, error } = await supabaseAdmin.from('teachers').select('id, name, national_id, is_active').eq('id', payload.teacherId).maybeSingle()
         if (error) return res.status(500).json({ error: error.message })
         if (!teacher || teacher.is_active === false) {
           return res.status(404).json({ error: 'Teacher not found or inactive' })
         }
-        return res.status(200).json({ isValid: true, teacher: { id: teacher.id, name: teacher.name } })
+        return res.status(200).json({ isValid: true, teacher: { id: teacher.id, name: teacher.name, national_id: teacher.national_id } })
       } catch (err) {
         return res.status(400).json({ error: 'Malformed token payload' })
       }

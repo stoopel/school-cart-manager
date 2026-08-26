@@ -268,22 +268,28 @@ export default function ImportCenter() {
       let inserted = 0, updated = 0
       for (let i = 0; i < parsedData.rows.length; i++) {
         const row = parsedData.rows[i]
-        const { data: existing } = await supabase
+        const cleanId = String(row.national_id || '').trim()
+        const unpadded = cleanId.replace(/^0+/, '')
+        const padded9 = cleanId.padStart(9, '0')
+
+        const { data: existingList } = await supabase
           .from('teachers')
           .select('id')
-          .eq('national_id', row.national_id)
-          .maybeSingle()
+          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .limit(1)
+
+        const existing = existingList && existingList.length > 0 ? existingList[0] : null
 
         if (existing) {
           const { error: patchErr } = await supabase
             .from('teachers')
             .update({ name: row.name })
-            .eq('national_id', row.national_id)
+            .eq('id', existing.id)
           if (!patchErr) updated++
         } else {
           const { error: postErr } = await supabase
             .from('teachers')
-            .insert({ name: row.name, national_id: row.national_id })
+            .insert({ name: row.name, national_id: cleanId })
           if (!postErr) inserted++
         }
         setProgress({ current: i + 1, total: parsedData.rows.length, type: 'teachers' })
@@ -338,22 +344,28 @@ export default function ImportCenter() {
         // Resolve teacher_id if national_id is provided
         let resolvedTeacherId = null
         if (row.teacher_national_id) {
-          const { data: t } = await supabase
+          const cleanTId = String(row.teacher_national_id || '').trim()
+          const unpadded = cleanTId.replace(/^0+/, '')
+          const padded9 = cleanTId.padStart(9, '0')
+
+          const { data: tList } = await supabase
             .from('teachers')
             .select('id')
-            .eq('national_id', row.teacher_national_id)
-            .maybeSingle()
+            .or(`national_id.eq.${cleanTId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+            .limit(1)
+
+          const t = tList && tList.length > 0 ? tList[0] : null
           
           if (t) {
             resolvedTeacherId = t.id
           } else {
-            // Auto-create teacher if they don't exist yet
+            // Auto-create teacher in teachers table if they don't exist yet
             const newTeacherName = row.teacher_name ? row.teacher_name.trim() : 'מורה חדש'
             const { data: newT, error: createTErr } = await supabase
               .from('teachers')
               .insert({
                 name: newTeacherName,
-                national_id: row.teacher_national_id
+                national_id: cleanTId
               })
               .select('id')
               .single()
@@ -362,7 +374,7 @@ export default function ImportCenter() {
               resolvedTeacherId = newT.id
             } else {
               console.error('Failed to auto-create teacher:', createTErr)
-              throw new Error(`נכשל בהקמת מורה חדש "${newTeacherName}" (ת.ז ${row.teacher_national_id}): ${createTErr?.message || 'שגיאה לא ידועה'}`)
+              throw new Error(`נכשל בהקמת מורה חדש "${newTeacherName}" (ת.ז ${cleanTId}): ${createTErr?.message || 'שגיאה לא ידועה'}`)
             }
           }
         }
@@ -433,7 +445,7 @@ export default function ImportCenter() {
     }
   }
 
-  // ─── 3. Save Students ──────────────────────────────────────────
+  // ─── 3. Save Students (With Teacher Shield & De-duplication) ────────────────
   const saveStudents = async () => {
     if (!parsedData || parsedData.type !== 'students') return
     setLoading(true)
@@ -441,15 +453,49 @@ export default function ImportCenter() {
     setProgress({ current: 0, total: parsedData.rows.length, type: 'students' })
 
     try {
-      let stuUpserted = 0, membersLinked = 0, groupsCreated = 0
+      // Pre-fetch all teacher IDs to prevent any teacher from being saved as student
+      const { data: allTeachers } = await supabase.from('teachers').select('national_id')
+      const teacherNids = new Set()
+      if (allTeachers) {
+        for (const t of allTeachers) {
+          if (t.national_id) {
+            const raw = String(t.national_id).trim()
+            teacherNids.add(raw)
+            teacherNids.add(raw.replace(/^0+/, ''))
+            teacherNids.add(raw.padStart(9, '0'))
+          }
+        }
+      }
+
+      let stuUpserted = 0, membersLinked = 0, groupsCreated = 0, teachersSkipped = 0
 
       for (let i = 0; i < parsedData.rows.length; i++) {
         const row = parsedData.rows[i]
+        const cleanId = String(row.national_id || '').trim()
+        const unpadded = cleanId.replace(/^0+/, '')
+        const padded9 = cleanId.padStart(9, '0')
+
+        // Teacher Shield: Check if this row is a teacher by class, grade or existing teacher ID
+        const isTeacherRow = (
+          row.class_name === 'מורה' ||
+          (typeof row.class_name === 'string' && (row.class_name.includes('מורה') || row.class_name.includes('צוות'))) ||
+          row.grade === 99 ||
+          teacherNids.has(cleanId) ||
+          teacherNids.has(unpadded) ||
+          teacherNids.has(padded9)
+        )
+
+        if (isTeacherRow) {
+          teachersSkipped++
+          setProgress({ current: i + 1, total: parsedData.rows.length, type: 'students' })
+          continue
+        }
+
         // 1. Upsert student record
         const { data: stu, error: stuErr } = await supabase
           .from('students')
           .upsert({
-            national_id: row.national_id,
+            national_id: cleanId,
             name: row.name,
             class_name: row.class_name
           }, { onConflict: 'national_id' })
@@ -528,7 +574,11 @@ export default function ImportCenter() {
         setProgress({ current: i + 1, total: parsedData.rows.length, type: 'students' })
       }
 
-      setSuccess(`✅ קליטת התלמידים והשיבוצים הושלמה! יובאו/עודכנו ${stuUpserted} תלמידים, נוצרו ${groupsCreated} קבוצות לימוד חדשות (ללא מורה), וקושרו ${membersLinked} שיוכי תלמידים לקבוצות.`)
+      let successMsg = `✅ קליטת התלמידים והשיבוצים הושלמה! יובאו/עודכנו ${stuUpserted} תלמידים, נוצרו ${groupsCreated} קבוצות לימוד חדשות (ללא מורה), וקושרו ${membersLinked} שיוכי תלמידים לקבוצות.`
+      if (teachersSkipped > 0) {
+        successMsg += ` 🛡️ זוהו ודולגו ${teachersSkipped} רשומות מורים כדי למנוע כפילויות בטבלת התלמידים.`
+      }
+      setSuccess(successMsg)
       setParsedData(null)
       loadOrphanGroups()
     } catch (err) {

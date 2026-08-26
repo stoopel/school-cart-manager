@@ -200,13 +200,46 @@ export default function Students() {
         group_name:  String(r['קבוצה'] || r['group'] || r['שם קבוצה'] || '').trim()
       })).filter(r => r.national_id && r.name)
 
-      let inserted = 0, skipped = 0
+      // Pre-fetch teacher IDs to prevent teachers from polluting students table
+      const { data: allTeachers } = await supabase.from('teachers').select('national_id')
+      const teacherNids = new Set()
+      if (allTeachers) {
+        for (const t of allTeachers) {
+          if (t.national_id) {
+            const raw = String(t.national_id).trim()
+            teacherNids.add(raw)
+            teacherNids.add(raw.replace(/^0+/, ''))
+            teacherNids.add(raw.padStart(9, '0'))
+          }
+        }
+      }
+
+      let inserted = 0, skipped = 0, teachersSkipped = 0
       for (const row of toInsert) {
+        const cleanId = String(row.national_id || '').trim()
+        const unpadded = cleanId.replace(/^0+/, '')
+        const padded9 = cleanId.padStart(9, '0')
+
+        // Teacher Shield: Check if this row is a teacher by class, grade or existing teacher ID
+        const isTeacherRow = (
+          row.class_name === 'מורה' ||
+          (typeof row.class_name === 'string' && (row.class_name.includes('מורה') || row.class_name.includes('צוות'))) ||
+          row.grade === 99 ||
+          teacherNids.has(cleanId) ||
+          teacherNids.has(unpadded) ||
+          teacherNids.has(padded9)
+        )
+
+        if (isTeacherRow) {
+          teachersSkipped++
+          continue
+        }
+
         // 1. Upsert Student
         const { data: stuData, error: stuErr } = await supabase
           .from('students')
           .upsert({
-            national_id: row.national_id,
+            national_id: cleanId,
             name: row.name,
             class_name: row.class_name,
             grade: row.grade
@@ -247,7 +280,7 @@ export default function Students() {
           }
         }
       }
-      setImportResult({ inserted, skipped, total: toInsert.length })
+      setImportResult({ inserted, skipped, teachersSkipped, total: toInsert.length })
       load()
       loadGroups()
     } catch (err) {
@@ -305,6 +338,9 @@ export default function Students() {
                   disabled={importing}
                 />
               </label>
+              <a href="/admin/import" className="btn btn-ghost" style={{ fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}>
+                ⚙️ מרכז ייבוא בית ספרי
+              </a>
             </div>
             <input
               className="form-input"
@@ -320,7 +356,7 @@ export default function Students() {
             <div className={`alert ${importResult.error ? 'alert-danger' : 'alert-success'}`} style={{ marginBottom: 16 }}>
               {importResult.error
                 ? `❌ שגיאה: ${importResult.error}`
-                : `✅ יובאו ${importResult.inserted} מתוך ${importResult.total} תלמידים. ${importResult.skipped} דולגו (או עודכנו בהצלחה).`}
+                : `✅ יובאו ${importResult.inserted} מתוך ${importResult.total} תלמידים. ${importResult.skipped} שגיאות/דולגו.${importResult.teachersSkipped > 0 ? ` 🛡️ זוהו ודולגו ${importResult.teachersSkipped} רשומות מורים כדי למנוע כפילויות.` : ''}`}
             </div>
           )}
 

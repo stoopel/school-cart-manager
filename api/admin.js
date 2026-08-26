@@ -139,25 +139,61 @@ export default async function handler(req, res) {
       if (!type || !Array.isArray(records)) return res.status(400).json({ error: 'type and records array are required' })
 
       if (type === 'students') {
+        // Pre-fetch all teacher IDs to prevent any teacher from ever being inserted into students table
+        const { data: teacherList } = await supabaseAdmin.from('teachers').select('national_id')
+        const teacherNids = new Set()
+        if (teacherList) {
+          for (const t of teacherList) {
+            if (t.national_id) {
+              const raw = String(t.national_id).trim()
+              teacherNids.add(raw)
+              teacherNids.add(raw.replace(/^0+/, ''))
+              teacherNids.add(raw.padStart(9, '0'))
+            }
+          }
+        }
+
+        let skippedTeachersCount = 0
         const uniqueRecords = Object.values(
           records.reduce((acc, r) => {
             if (r.national_id) {
-              const cleanId = String(r.national_id).trim().padStart(9, '0')
-              acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
+              const cleanId = String(r.national_id).trim()
+              const unpadded = cleanId.replace(/^0+/, '')
+              const padded9 = cleanId.padStart(9, '0')
+
+              const isTeacher = (
+                r.class_name === 'מורה' ||
+                (typeof r.class_name === 'string' && (r.class_name.includes('מורה') || r.class_name.includes('צוות'))) ||
+                r.grade === 99 ||
+                teacherNids.has(cleanId) ||
+                teacherNids.has(unpadded) ||
+                teacherNids.has(padded9)
+              )
+
+              if (isTeacher) {
+                skippedTeachersCount++
+              } else {
+                acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
+              }
             }
             return acc
           }, {})
         )
+
+        if (uniqueRecords.length === 0) {
+          return res.status(200).json({ success: true, count: 0, unique_count: 0, skipped_teachers: skippedTeachersCount })
+        }
+
         const { data, error } = await supabaseAdmin.from('students').upsert(uniqueRecords, { onConflict: 'national_id' }).select()
         if (error) return res.status(500).json({ error: error.message, unique_count: uniqueRecords.length })
-        return res.status(200).json({ success: true, count: data?.length || 0, unique_count: uniqueRecords.length })
+        return res.status(200).json({ success: true, count: data?.length || 0, unique_count: uniqueRecords.length, skipped_teachers: skippedTeachersCount })
       }
 
       if (type === 'teachers') {
         const uniqueRecords = Object.values(
           records.reduce((acc, r) => {
             if (r.national_id) {
-              const cleanId = String(r.national_id).trim().padStart(9, '0')
+              const cleanId = String(r.national_id).trim()
               acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
             }
             return acc

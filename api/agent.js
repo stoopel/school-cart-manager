@@ -82,7 +82,7 @@ export default async function handler(req, res) {
 
       const { data: devs, error: devErr } = await supabaseAdmin
         .from('devices')
-        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, checkout_at, digital_login_at, lesson_id, students(id, national_id, name, class_name, grade, charge_strikes))')
+        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, checkout_at, digital_login_at, lesson_id, notes, students(id, national_id, name, class_name, grade, charge_strikes))')
         .eq('asset_tag', assetTag)
         .is('deleted_at', null)
         .eq('device_loans.status', 'active')
@@ -130,7 +130,42 @@ export default async function handler(req, res) {
 
       const loan = loans[0]
       const s = Array.isArray(loan.students) ? loan.students[0] : loan.students
+
+      // Check if this is a teacher loan (recorded with notes or student_id is null)
       if (!s) {
+        let teacherNote = null
+        if (loan.notes) {
+          try { teacherNote = JSON.parse(loan.notes) } catch (e) {}
+        }
+        if (teacherNote && teacherNote.isTeacher) {
+          const formattedTeacherLoan = {
+            device_id: dev.id,
+            device_number: dev.device_number,
+            cart_id: dev.cart_id,
+            cart_name: cartName || '',
+            loan_id: loan.id,
+            student_id: null,
+            teacher_id: teacherNote.teacherId || null,
+            national_id: teacherNote.nationalId || '',
+            student_name: teacherNote.teacherName || 'מורה',
+            teacher_name: teacherNote.teacherName || 'מורה',
+            is_teacher_loan: true,
+            class_name: 'מורה',
+            grade: 0,
+            charge_strikes: 0,
+            enable_charge_tracking: false,
+            checkout_at: loan.checkout_at,
+            digital_login_at: loan.digital_login_at
+          }
+          return res.status(200).json({
+            loan: formattedTeacherLoan,
+            device_id: dev.id,
+            registered: true,
+            cart_name: cartName || '',
+            device_number: dev.device_number
+          })
+        }
+
         return res.status(200).json({
           loan: null,
           device_id: dev.id,
@@ -153,40 +188,55 @@ export default async function handler(req, res) {
         grade: s.grade || 0,
         charge_strikes: s.charge_strikes || 0,
         enable_charge_tracking: enable_tracking,
-        lesson_id: loan.lesson_id
+        checkout_at: loan.checkout_at,
+        digital_login_at: loan.digital_login_at
       }
-      return res.status(200).json({ loan: formattedLoan, device_id: dev.id, registered: true })
+      return res.status(200).json({
+        loan: formattedLoan,
+        device_id: dev.id,
+        registered: true,
+        cart_name: cartName || '',
+        device_number: dev.device_number
+      })
     }
 
-    // Route 2: Heartbeat
-    if (targetRoute === 'heartbeat' || (!targetRoute && (body.batteryLevel !== undefined || body.eventType))) {
-      const { deviceId, batteryLevel, isCharging, status, loanId, eventType, payload } = body
-      if (!deviceId) return res.status(400).json({ error: 'deviceId is required' })
-
+    // Route 2: Digital Login / Digital Logout / Heartbeat
+    if (targetRoute === 'login' || targetRoute === 'logout' || targetRoute === 'heartbeat' || body.action === 'login' || body.action === 'logout' || body.action === 'heartbeat') {
+      const action = targetRoute || body.action
+      const loanId = body.loanId || body.loan_id
+      const deviceId = body.deviceId || body.device_id
       const now = new Date().toISOString()
-      const updateData = { last_seen: now }
-      if (batteryLevel !== undefined) updateData.last_battery_level = batteryLevel
-      if (isCharging !== undefined) updateData.is_charging = isCharging
-      if (status) updateData.status = status
 
-      await supabaseAdmin.from('devices').update(updateData).eq('id', deviceId)
-
-      if (eventType === 'digital_login' && loanId) {
+      if (action === 'login' && loanId) {
         await supabaseAdmin.from('device_loans').update({ digital_login_at: now }).eq('id', loanId)
-        await supabaseAdmin.from('devices').update({ status: 'active', last_seen: now }).eq('id', deviceId)
-      } else if (eventType === 'digital_logout' && loanId) {
-        await supabaseAdmin.from('device_loans').update({ digital_logout_at: now }).eq('id', loanId)
-        await supabaseAdmin.from('devices').update({ status: 'locked', last_seen: now }).eq('id', deviceId)
+        if (deviceId) {
+          await supabaseAdmin.from('event_log').insert({ device_id: deviceId, loan_id: loanId, source: 'agent', event_type: 'digital_login', payload: {} })
+        }
       }
 
-      if (eventType) {
-        await supabaseAdmin.from('event_log').insert({
-          device_id: deviceId,
-          loan_id: loanId || null,
-          source: 'agent',
-          event_type: eventType,
-          payload: payload || {}
-        })
+      if (action === 'logout' && loanId) {
+        await supabaseAdmin.from('device_loans').update({ digital_logout_at: now }).eq('id', loanId)
+        if (deviceId) {
+          await supabaseAdmin.from('event_log').insert({ device_id: deviceId, loan_id: loanId, source: 'agent', event_type: 'digital_logout', payload: {} })
+        }
+      }
+
+      if (deviceId) {
+        const updatePayload = { last_seen: now }
+        if (body.batteryLevel !== undefined && body.batteryLevel !== null) updatePayload.battery_level = body.batteryLevel
+        if (body.isCharging !== undefined && body.isCharging !== null) updatePayload.is_charging = body.isCharging
+
+        await supabaseAdmin.from('devices').update(updatePayload).eq('id', deviceId)
+
+        if (body.event_type) {
+          await supabaseAdmin.from('event_log').insert({
+            device_id: deviceId,
+            loan_id: loanId || null,
+            source: 'agent',
+            event_type: body.event_type,
+            payload: body.payload || {}
+          })
+        }
       }
       return res.status(200).json({ success: true, server_time: now })
     }
@@ -198,18 +248,45 @@ export default async function handler(req, res) {
       if (!nationalId) return res.status(400).json({ error: 'nationalId is required' })
 
       if (action === 'verify_teacher' || action === 'verify-id') {
-        const { data: resRpc, error } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: nationalId })
-        if (error) return res.status(500).json({ error: error.message })
-        if (resRpc && resRpc.is_valid) {
-          return res.status(200).json({ isTeacher: true, teacher: { id: resRpc.teacher_id, name: resRpc.teacher_name } })
+        const cleanId = String(nationalId).trim()
+        const unpadded = cleanId.replace(/^0+/, '')
+        const padded9 = cleanId.padStart(9, '0')
+
+        // 1. Try RPC verify_teacher_id
+        const { data: resRpc, error } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: cleanId })
+        if (!error && resRpc && resRpc.is_valid) {
+          return res.status(200).json({ isTeacher: true, teacher: { id: resRpc.teacher_id, name: resRpc.teacher_name, national_id: resRpc.national_id || cleanId } })
         }
+
+        // 2. Direct fallback query with unpadded and padded versions
+        const { data: tList } = await supabaseAdmin
+          .from('teachers')
+          .select('id, name, national_id, is_active')
+          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .eq('is_active', true)
+          .limit(1)
+
+        if (tList && tList.length > 0) {
+          const t = tList[0]
+          return res.status(200).json({ isTeacher: true, teacher: { id: t.id, name: t.name, national_id: t.national_id } })
+        }
+
         return res.status(200).json({ isTeacher: false, teacher: null })
       }
 
       if (action === 'verify_student') {
-        const { data: stu, error } = await supabaseAdmin.from('students').select('id, national_id, name, class_name, charge_strikes').eq('national_id', nationalId).single()
-        if (error || !stu) return res.status(404).json({ error: 'Student not found' })
-        return res.status(200).json({ student: stu })
+        const cleanId = String(nationalId).trim()
+        const unpadded = cleanId.replace(/^0+/, '')
+        const padded9 = cleanId.padStart(9, '0')
+
+        const { data: stus, error } = await supabaseAdmin
+          .from('students')
+          .select('id, national_id, name, class_name, charge_strikes')
+          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .limit(1)
+
+        if (error || !stus || stus.length === 0) return res.status(404).json({ error: 'Student not found' })
+        return res.status(200).json({ student: stus[0] })
       }
     }
 

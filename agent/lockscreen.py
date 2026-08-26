@@ -1855,11 +1855,12 @@ class LockScreen:
         self.lbl_status.config(text="")
         self.clear_selection_screen()
         
-        if self.loan_data and self.loan_data.get("student_name"):
-            name = self.loan_data.get("student_name", "")
+        if self.loan_data and (self.loan_data.get("student_name") or self.loan_data.get("teacher_name")):
+            name = self.loan_data.get("student_name") or self.loan_data.get("teacher_name", "")
             klass = self.loan_data.get("class_name", "")
+            class_part = f" | כיתה {klass}" if klass and klass != "מורה" else (" | מורה" if klass == "מורה" else "")
             self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
-            self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {name} | כיתה {klass}", fg=TEXT_DIM)
+            self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {name}{class_part}", fg=TEXT_DIM)
         elif self.loan_data and self.loan_data.get("unborrowed"):
             cart = self.loan_data.get("cart_name", "")
             dev_num = self.loan_data.get("device_number")
@@ -1967,6 +1968,7 @@ class LockScreen:
     def relock(self, message: str = "המחשב ננעל מחדש"):
         """נועל חזרה – נקרא כשהשאלה נסגרת מרחוק"""
         self._unlocked = False
+        self._step = 1
         self.entered_id = ""
         self._verifying = False
         self.hide_lesson_widget()

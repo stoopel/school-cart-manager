@@ -62,30 +62,65 @@ export default async function handler(req, res) {
         if (!nationalId || nationalId.length < 5) {
           return res.status(400).json({ error: 'תעודת זהות חייבת להכיל לפחות 5 ספרות' })
         }
-        const { data: stu, error: stuErr } = await supabaseAdmin
+        const cleanId = String(nationalId).trim()
+        const unpadded = cleanId.replace(/^0+/, '')
+        const padded9 = cleanId.padStart(9, '0')
+
+        // 1. Search in students table
+        const { data: stus, error: stuErr } = await supabaseAdmin
           .from('students')
           .select('*')
-          .eq('national_id', nationalId)
-          .single()
+          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .limit(1)
 
-        if (stuErr || !stu) return res.status(444).json({ error: 'תעודת זהות לא נמצאה במערכת. פנה למורה.' })
+        let stu = stus && stus.length > 0 ? stus[0] : null
+        let isTeacher = false
 
-        const { data: existing } = await supabaseAdmin
-          .from('device_loans')
-          .select('id, devices(device_number, carts(name, display_name))')
-          .eq('student_id', stu.id)
-          .eq('status', 'active')
-          .is('checkin_at', null)
-          .single()
+        // 2. If not found in students, search in teachers table
+        if (!stu) {
+          const { data: teachers, error: tErr } = await supabaseAdmin
+            .from('teachers')
+            .select('*')
+            .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+            .eq('is_active', true)
+            .limit(1)
 
-        if (existing) {
-          const devNum = existing.devices?.device_number
-          const cartName = existing.devices?.carts?.display_name || existing.devices?.carts?.name
-          return res.status(400).json({
-            error: `יש לך מחשב מס' ${devNum} מ${cartName} שלא הוחזר. יש להחזירו לפני לקיחת מחשב חדש.`
-          })
+          if (teachers && teachers.length > 0) {
+            const t = teachers[0]
+            isTeacher = true
+            stu = {
+              id: t.id,
+              national_id: t.national_id,
+              name: t.name,
+              class_name: 'מורה',
+              grade: 0,
+              is_teacher: true
+            }
+          }
         }
-        return res.status(200).json({ student: stu })
+
+        if (!stu) return res.status(444).json({ error: 'תעודת זהות לא נמצאה במערכת. פנה למורה.' })
+
+        // 3. Check for existing active loans
+        if (!isTeacher) {
+          const { data: existing } = await supabaseAdmin
+            .from('device_loans')
+            .select('id, devices(device_number, carts(name, display_name))')
+            .eq('student_id', stu.id)
+            .eq('status', 'active')
+            .is('checkin_at', null)
+            .maybeSingle()
+
+          if (existing) {
+            const devNum = existing.devices?.device_number
+            const cartName = existing.devices?.carts?.display_name || existing.devices?.carts?.name
+            return res.status(400).json({
+              error: `יש לך מחשב מס' ${devNum} מ${cartName} שלא הוחזר. יש להחזירו לפני לקיחת מחשב חדש.`
+            })
+          }
+        }
+
+        return res.status(200).json({ student: stu, isTeacher })
       }
 
       if (action === 'checkout') {
@@ -102,17 +137,23 @@ export default async function handler(req, res) {
 
         if (!targetDev) return res.status(444).json({ error: 'מחשב לא נמצא במערכת.' })
 
-        const { data: takenLoan } = await supabaseAdmin.from('device_loans').select('id').eq('device_id', targetDev.id).eq('status', 'active').is('checkin_at', null).single()
+        const { data: takenLoan } = await supabaseAdmin.from('device_loans').select('id').eq('device_id', targetDev.id).eq('status', 'active').is('checkin_at', null).maybeSingle()
         if (takenLoan) return res.status(400).json({ error: `מחשב מס' ${targetDev.device_number} כבר נלקח.` })
 
         const validMethod = (checkoutMethod === 'qr_scan' || checkoutMethod === 'manual_number') ? checkoutMethod : 'manual_number'
 
-        const { data: newLoan, error: insertErr } = await supabaseAdmin.from('device_loans').insert({
+        // Check if studentId is a teacher ID
+        const { data: teacherRecord } = await supabaseAdmin.from('teachers').select('id, name, national_id').eq('id', studentId).eq('is_active', true).maybeSingle()
+
+        const insertPayload = {
           device_id: targetDev.id,
-          student_id: studentId,
+          student_id: teacherRecord ? null : studentId,
+          notes: teacherRecord ? JSON.stringify({ isTeacher: true, teacherId: teacherRecord.id, teacherName: teacherRecord.name, nationalId: teacherRecord.national_id }) : null,
           checkout_method: validMethod,
           status: 'active'
-        }).select().single()
+        }
+
+        const { data: newLoan, error: insertErr } = await supabaseAdmin.from('device_loans').insert(insertPayload).select().single()
 
         if (insertErr) return res.status(500).json({ error: 'שגיאה ברשת. נסה שנית.' })
         return res.status(200).json({ success: true, device: targetDev, loan: newLoan })

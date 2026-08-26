@@ -288,13 +288,17 @@ class CartAgent:
                 return
 
             # 5. וידוא התאמה מול מזהה ההשאלה הקיים של התלמיד
-            if entered != self.loan_data["national_id"]:
-                name = self.loan_data["student_name"]
+            entered_clean = entered.lstrip('0')
+            loan_nid = str(self.loan_data.get("national_id", ""))
+            loan_nid_clean = loan_nid.lstrip('0')
+
+            if entered != loan_nid and entered_clean != loan_nid_clean:
+                name = self.loan_data.get("student_name", "")
                 self.screen.root.after(0, lambda: [
                     self.screen.set_verifying(False),
                     self.screen.show_status(f"שגיאה: מחשב זה שייך ל-{name}.", "#ef4444")
                 ])
-                if self.device_id:
+                if self.device_id and self.loan_data.get("loan_id"):
                     db.log_event(self.device_id, self.loan_data["loan_id"],
                                  "auth_failed", {"prefix": entered[:3]})
                 return
@@ -540,13 +544,13 @@ class CartAgent:
 
     def _async_student_disconnect(self):
         try:
-            if not self.loan_data:
+            if not self.loan_data or not self.loan_data.get("loan_id"):
                 log.warning("Disconnection requested but no active loan found locally.")
                 return
 
-            loan_id = self.loan_data["loan_id"]
-            device_id = self.loan_data["device_id"]
-            student_id = self.loan_data["student_id"]
+            loan_id = self.loan_data.get("loan_id")
+            device_id = self.loan_data.get("device_id")
+            student_id = self.loan_data.get("student_id")
             lesson_id = self._lesson_data["lesson_id"] if self._lesson_data else None
 
             log.info(f"Disconnecting student_id={student_id} from lesson_id={lesson_id}")
@@ -690,7 +694,7 @@ class CartAgent:
             if self._lesson_timer.check_time_manipulation():
                 log.warning("System clock manipulation detected! Force locking device.")
                 self._unlocked = False
-                if self.device_id and self.loan_data:
+                if self.device_id and self.loan_data and self.loan_data.get("loan_id"):
                     db.log_event(self.device_id, self.loan_data["loan_id"], "clock_tampering_detected", {
                         "expected_remaining": self._lesson_timer.expected_remaining_at_start - (time.monotonic() - self._lesson_timer.start_mono),
                         "system_remaining": self._lesson_timer.remaining_seconds()
@@ -826,13 +830,16 @@ class CartAgent:
                 self.screen.show_status("⚠️ מחשב זה מנותק מהאינטרנט. אנא חבר ל-Wi-Fi או הזן קוד מנהל.", "#ef4444")
             return
 
-        old_loan_id  = self.loan_data["loan_id"] if self.loan_data else None
-        new_loan_id  = new_loan["loan_id"]        if new_loan  else None
+        old_loan_id  = self.loan_data["loan_id"] if (self.loan_data and not self.loan_data.get("unborrowed")) else None
+        new_loan_id  = new_loan["loan_id"]        if (new_loan and not new_loan.get("unborrowed")) else None
+        is_borrowed  = bool(new_loan and not new_loan.get("unborrowed") and not new_loan.get("unregistered") and (new_loan.get("student_name") or new_loan.get("loan_id")))
 
         if old_loan_id != new_loan_id:
-            log.info(f"Loan changed: {old_loan_id} → {new_loan_id}")
+            log.info(f"Loan changed: {old_loan_id} → {new_loan_id} (is_borrowed={is_borrowed})")
             self.loan_data   = new_loan
             self._unlocked   = False
+            self._teacher_bypass = False
+            self._teacher_info = None
             self._lesson_data = None
             self._lesson_timer = None
             if not self.device_id and new_loan and isinstance(new_loan, dict) and new_loan.get("device_id"):
@@ -840,10 +847,22 @@ class CartAgent:
                 self._start_loan_realtime(self.device_id)
             if self.screen:
                 self.screen.set_loan_info(self.loan_data)
-                if self.loan_data:
-                    self.screen.show_lesson_code_prompt()
+                if is_borrowed:
+                    borrower_name = new_loan.get("student_name") or new_loan.get("teacher_name", "")
+                    self.screen.relock(f"המחשב הוצא על שם: {borrower_name}")
                 else:
                     self.screen.relock("מחשב זה זמין לשימוש חדש.")
+        elif self._unlocked and not is_borrowed:
+            log.info("Device is unlocked but loan state is unborrowed. Forcing relock.")
+            self.loan_data = new_loan
+            self._unlocked = False
+            self._teacher_bypass = False
+            self._teacher_info = None
+            self._lesson_data = None
+            self._lesson_timer = None
+            if self.screen:
+                self.screen.set_loan_info(self.loan_data)
+                self.screen.relock("מחשב זה זמין לשימוש חדש.")
         else:
             # If screen is locked and network status is offline, show warning; else clear warning
             if not self._unlocked and self.screen:
@@ -874,8 +893,8 @@ class CartAgent:
     def _check_charging_after_wake(self):
         """משווה סוללה לפני/אחרי שינה ומחליט אם לרשום strike"""
         if not self.device_id: return
-        if not self.loan_data:
-            log.info("Device is not currently borrowed. Skipping charge check.")
+        if not self.loan_data or not self.loan_data.get("student_id"):
+            log.info("Device is not currently borrowed by a student. Skipping charge check.")
             return
 
         current, charging = get_battery_info()

@@ -178,9 +178,22 @@ def log_event(device_id, loan_id, event_type, payload=None):
 
 def is_teacher(national_id: str) -> dict | None:
     """מחזיר רשומת מורה אם ת.ז. שייכת למורה פעיל באמצעות API מאובטח"""
-    res = _api_post("verify-id", {"action": "verify_teacher", "nationalId": national_id})
+    if not national_id: return None
+    clean_id = str(national_id).strip()
+    res = _api_post("verify-id", {"action": "verify_teacher", "nationalId": clean_id})
     if res and res.get("isTeacher"):
         return res.get("teacher")
+    
+    # Fallback checks if needed
+    if clean_id.startswith("0"):
+        res = _api_post("verify-id", {"action": "verify_teacher", "nationalId": clean_id.lstrip("0")})
+        if res and res.get("isTeacher"):
+            return res.get("teacher")
+    elif len(clean_id) < 9:
+        res = _api_post("verify-id", {"action": "verify_teacher", "nationalId": clean_id.zfill(9)})
+        if res and res.get("isTeacher"):
+            return res.get("teacher")
+
     return None
 
 

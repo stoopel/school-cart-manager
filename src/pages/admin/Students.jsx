@@ -66,11 +66,14 @@ export default function Students() {
     setLoadingMembers(false)
   }
 
-  const filteredStudents = students.filter(s =>
-    s.name.includes(search) ||
-    s.national_id.includes(search) ||
-    (s.class_name && s.class_name.includes(search))
-  )
+  const filteredStudents = students.filter(s => {
+    if (!showArchived && s.is_active === false) return false
+    return (
+      s.name.includes(search) ||
+      s.national_id.includes(search) ||
+      (s.class_name && s.class_name.includes(search))
+    )
+  })
 
   const filteredGroups = groups.filter(g =>
     g.name.includes(searchGroup) ||
@@ -82,24 +85,50 @@ export default function Students() {
     if (!form.national_id || !form.name) return
     setError('')
     setSaving(true)
-    const { error: err } = await supabase.from('students').insert({
-      national_id: form.national_id.trim(),
-      name: form.name.trim(),
-      class_name: form.class_name.trim() || null,
-      grade: form.grade ? parseInt(form.grade) : null,
-    })
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({
+          scope: 'students',
+          action: 'save_student',
+          student: {
+            national_id: form.national_id.trim(),
+            name: form.name.trim(),
+            class_name: form.class_name.trim() || null,
+            grade: form.grade ? parseInt(form.grade) : null,
+          }
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'שגיאה בשמירת התלמיד')
+        setSaving(false)
+        return
+      }
+      if (data.reactivated) {
+        alert('💡 תלמיד זה היה מושבת בארכיון והופעל מחדש בהצלחה עם הפרטים המעודכנים!')
+      }
+    } catch (err) {
+      setError(err.message || 'שגיאת תקשורת')
+      setSaving(false)
+      return
+    }
     setSaving(false)
-    if (err) { setError(err.message); return }
     setShowAdd(false)
     setForm({ national_id: '', name: '', class_name: '', grade: '' })
     load()
   }
 
   async function deleteStudent(id) {
-    if (!confirm('האם למחוק תלמיד זה?')) return
+    if (!confirm('האם למחוק / להשבית תלמיד זה?')) return
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      await fetch('/api/admin', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -111,14 +140,49 @@ export default function Students() {
           studentId: id
         })
       })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'שגיאה במחיקת התלמיד')
+        return
+      }
     } catch (e) {
       console.error('Error deleting student:', e)
+      alert('שגיאת תקשורת בעת מחיקת התלמיד')
+      return
     }
     load()
-    loadGroups() // Member counts might change
+    loadGroups()
     if (selectedGroup) {
       loadGroupMembers(selectedGroup.id)
     }
+  }
+
+  async function restoreStudent(id) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({
+          scope: 'students',
+          action: 'restore_student',
+          studentId: id
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'שגיאה בשחזור התלמיד')
+        return
+      }
+    } catch (e) {
+      console.error('Error restoring student:', e)
+      alert('שגיאת תקשורת בשחזור התלמיד')
+      return
+    }
+    load()
   }
 
   async function handleAddGroup(e) {
@@ -242,7 +306,9 @@ export default function Students() {
             national_id: cleanId,
             name: row.name,
             class_name: row.class_name,
-            grade: row.grade
+            grade: row.grade,
+            is_active: true,
+            deleted_at: null
           }, { onConflict: 'national_id' })
           .select('id')
           .single()
@@ -342,13 +408,23 @@ export default function Students() {
                 ⚙️ מרכז ייבוא בית ספרי
               </a>
             </div>
-            <input
-              className="form-input"
-              style={{ maxWidth: 280 }}
-              placeholder="🔍 חיפוש לפי שם / ת.ז. / כיתה"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
+            <div className="flex items-center gap-3">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={e => setShowArchived(e.target.checked)}
+                />
+                📁 הצג מושבתים / ארכיון
+              </label>
+              <input
+                className="form-input"
+                style={{ maxWidth: 280 }}
+                placeholder="🔍 חיפוש לפי שם / ת.ז. / כיתה"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
           </div>
 
           {/* Import result */}
@@ -388,15 +464,26 @@ export default function Students() {
                   </thead>
                   <tbody>
                     {filteredStudents.map(s => (
-                      <tr key={s.id}>
-                        <td style={{ fontWeight: 600 }}>{s.name}</td>
+                      <tr key={s.id} style={s.is_active === false ? { opacity: 0.65, backgroundColor: 'rgba(239, 68, 68, 0.04)' } : {}}>
+                        <td style={{ fontWeight: 600 }}>
+                          {s.name}
+                          {s.is_active === false && (
+                            <span className="badge badge-warning" style={{ marginRight: 8, fontSize: '0.72rem' }}>מושבת</span>
+                          )}
+                        </td>
                         <td style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}>{s.national_id}</td>
                         <td><span className="badge badge-info">{s.class_name || '—'}</span></td>
                         <td className="text-muted">{s.grade || '—'}</td>
                         <td>
-                          <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger-light)' }} onClick={() => deleteStudent(s.id)}>
-                            🗑️
-                          </button>
+                          {s.is_active === false ? (
+                            <button className="btn btn-ghost btn-sm" title="שחזר תלמיד" onClick={() => restoreStudent(s.id)}>
+                              🔄 שחזר
+                            </button>
+                          ) : (
+                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger-light)' }} title="מחק / השבת תלמיד" onClick={() => deleteStudent(s.id)}>
+                              🗑️
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

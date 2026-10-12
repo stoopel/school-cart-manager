@@ -6,6 +6,22 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   try {
+    // ─── בדיקת אימות והרשאת מנהל (ADMIN AUTH CHECK) ───────────
+    const authHeader = req.headers.authorization || req.headers.Authorization
+    if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
+      return res.status(401).json({ error: 'גישה נדחתה: חסרה הרשאת אימות מנהל (Missing authorization token)' })
+    }
+
+    const token = authHeader.slice(7).trim()
+    if (!token) {
+      return res.status(401).json({ error: 'גישה נדחתה: טוקן אימות ריק (Empty authorization token)' })
+    }
+
+    const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token)
+    if (authError || !authData?.user) {
+      return res.status(401).json({ error: 'גישה נדחתה: טוקן אימות לא תקף או שפג תוקפו (Invalid or expired admin token)' })
+    }
+
     const body = req.body || {}
     const { scope, action, cart, cartId, device, deviceId, student, studentId, teacher, teacherId, loanId, type, records } = body
 
@@ -69,24 +85,93 @@ export default async function handler(req, res) {
     }
 
     // ─── STUDENTS SCOPE ────────────────────────────────────────
-    if (scope === 'students' || action === 'list_students' || action === 'save_student' || action === 'delete_student' || action === 'reset_strikes') {
+    if (scope === 'students' || action === 'list_students' || action === 'save_student' || action === 'delete_student' || action === 'restore_student' || action === 'reset_strikes') {
       if (action === 'list' || action === 'list_students') {
         const { data: students, error } = await supabaseAdmin.from('students').select('*').order('name')
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ students: students || [] })
       }
       if (action === 'save' || action === 'save_student') {
-        const result = student.id ? await supabaseAdmin.from('students').update(student).eq('id', student.id).select().single() : await supabaseAdmin.from('students').insert(student).select().single()
-        if (result.error) return res.status(500).json({ error: result.error.message })
-        return res.status(200).json({ student: result.data })
+        if (student.id) {
+          const result = await supabaseAdmin.from('students').update(student).eq('id', student.id).select().single()
+          if (result.error) return res.status(500).json({ error: result.error.message })
+          return res.status(200).json({ student: result.data })
+        } else {
+          const cleanId = (student.national_id || '').trim()
+          const { data: existing } = await supabaseAdmin
+            .from('students')
+            .select('*')
+            .eq('national_id', cleanId)
+            .maybeSingle()
+
+          if (existing) {
+            if (existing.is_active === false) {
+              const { data: reactivated, error: reactErr } = await supabaseAdmin
+                .from('students')
+                .update({
+                  ...student,
+                  is_active: true,
+                  deleted_at: null
+                })
+                .eq('id', existing.id)
+                .select()
+                .single()
+
+              if (reactErr) return res.status(500).json({ error: reactErr.message })
+              return res.status(200).json({ student: reactivated, reactivated: true })
+            } else {
+              return res.status(400).json({ error: 'תלמיד עם תעודת זהות זו כבר קיים במערכת.' })
+            }
+          }
+
+          const result = await supabaseAdmin.from('students').insert({ ...student, is_active: true }).select().single()
+          if (result.error) return res.status(500).json({ error: result.error.message })
+          return res.status(200).json({ student: result.data })
+        }
+      }
+      if (action === 'restore' || action === 'restore_student') {
+        const { data, error } = await supabaseAdmin
+          .from('students')
+          .update({ is_active: true, deleted_at: null })
+          .eq('id', studentId)
+          .select()
+          .single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.status(200).json({ success: true, student: data, restored: true })
       }
       if (action === 'delete' || action === 'delete_student') {
-        const { error } = await supabaseAdmin.from('students').delete().eq('id', studentId)
-        if (error) {
-          if (error.code === '23503') return res.status(400).json({ error: 'לא ניתן למחוק תלמיד שיש לו היסטוריית השאלות במערכת.' })
-          return res.status(500).json({ error: error.message })
+        // 1. חסימת מחיקה אם יש השאלה פעילה
+        const { data: activeLoans } = await supabaseAdmin
+          .from('device_loans')
+          .select('id')
+          .eq('student_id', studentId)
+          .eq('status', 'active')
+          .is('checkin_at', null)
+          .limit(1)
+
+        if (activeLoans && activeLoans.length > 0) {
+          return res.status(400).json({ error: 'לא ניתן למחוק תלמיד שמחזיק כרגע מחשב מושאל. יש להחזיר תחילה את המחשב לתחנת העגלה.' })
         }
-        return res.status(200).json({ success: true })
+
+        // 2. השבתה רכה
+        const { error } = await supabaseAdmin
+          .from('students')
+          .update({ is_active: false, deleted_at: new Date().toISOString() })
+          .eq('id', studentId)
+
+        if (error) return res.status(500).json({ error: error.message })
+
+        // 3. ניקוי שיוכים מקבוצות לימוד פעילות
+        try {
+          await supabaseAdmin
+            .from('student_group_members')
+            .delete()
+            .eq('student_id', studentId)
+        } catch (e) {
+          console.warn('Could not clean student group members:', e)
+        }
+
+        return res.status(200).json({ success: true, deactivated: true })
       }
       if (action === 'reset_strikes') {
         const { error } = await supabaseAdmin.from('students').update({ charge_strikes: 0, last_charged_at: new Date().toISOString() }).eq('id', studentId)
@@ -96,34 +181,75 @@ export default async function handler(req, res) {
     }
 
     // ─── TEACHERS SCOPE ────────────────────────────────────────
-    if (scope === 'teachers' || action === 'list_teachers' || action === 'save_teacher' || action === 'delete_teacher') {
+    if (scope === 'teachers' || action === 'list_teachers' || action === 'save_teacher' || action === 'delete_teacher' || action === 'restore_teacher') {
       if (action === 'list' || action === 'list_teachers') {
         const { data: teachers, error } = await supabaseAdmin.from('teachers').select('*').order('name')
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ teachers: teachers || [] })
       }
       if (action === 'save' || action === 'save_teacher') {
-        const result = teacher.id ? await supabaseAdmin.from('teachers').update(teacher).eq('id', teacher.id).select().single() : await supabaseAdmin.from('teachers').insert(teacher).select().single()
-        if (result.error) return res.status(500).json({ error: result.error.message })
-        return res.status(200).json({ teacher: result.data })
+        if (teacher.id) {
+          const result = await supabaseAdmin.from('teachers').update(teacher).eq('id', teacher.id).select().single()
+          if (result.error) return res.status(500).json({ error: result.error.message })
+          return res.status(200).json({ teacher: result.data })
+        } else {
+          const cleanId = (teacher.national_id || '').trim()
+          const { data: existing } = await supabaseAdmin
+            .from('teachers')
+            .select('*')
+            .eq('national_id', cleanId)
+            .maybeSingle()
+
+          if (existing) {
+            if (existing.is_active === false) {
+              const { data: reactivated, error: reactErr } = await supabaseAdmin
+                .from('teachers')
+                .update({ ...teacher, is_active: true })
+                .eq('id', existing.id)
+                .select()
+                .single()
+
+              if (reactErr) return res.status(500).json({ error: reactErr.message })
+              return res.status(200).json({ teacher: reactivated, reactivated: true })
+            } else {
+              return res.status(400).json({ error: 'מורה עם תעודת זהות זו כבר קיים במערכת.' })
+            }
+          }
+
+          const result = await supabaseAdmin.from('teachers').insert({ ...teacher, is_active: true }).select().single()
+          if (result.error) return res.status(500).json({ error: result.error.message })
+          return res.status(200).json({ teacher: result.data })
+        }
+      }
+      if (action === 'restore' || action === 'restore_teacher') {
+        const { data, error } = await supabaseAdmin.from('teachers').update({ is_active: true }).eq('id', teacherId).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+        return res.status(200).json({ success: true, teacher: data, restored: true })
       }
       if (action === 'delete' || action === 'delete_teacher') {
-        const { error } = await supabaseAdmin.from('teachers').delete().eq('id', teacherId)
-        if (error) {
-          if (error.code === '23503') {
-            await supabaseAdmin.from('teachers').update({ is_active: false }).eq('id', teacherId)
-            return res.status(200).json({ success: true, deactivated: true })
-          }
-          return res.status(500).json({ error: error.message })
+        // 1. חסימת מחיקה אם יש השאלה פעילה
+        const { data: activeLoans } = await supabaseAdmin
+          .from('device_loans')
+          .select('id')
+          .eq('teacher_id', teacherId)
+          .eq('status', 'active')
+          .is('checkin_at', null)
+          .limit(1)
+
+        if (activeLoans && activeLoans.length > 0) {
+          return res.status(400).json({ error: 'לא ניתן למחוק מורה שמחזיק כרגע מחשב מושאל. יש להחזיר תחילה את המחשב לתחנת העגלה.' })
         }
-        return res.status(200).json({ success: true })
+
+        const { error } = await supabaseAdmin.from('teachers').update({ is_active: false }).eq('id', teacherId)
+        if (error) return res.status(500).json({ error: error.message })
+        return res.status(200).json({ success: true, deactivated: true })
       }
     }
 
     // ─── LOANS SCOPE ───────────────────────────────────────────
     if (scope === 'loans' || action === 'list_loans' || action === 'force_return') {
       if (action === 'list' || action === 'list_loans') {
-        const { data: loans, error } = await supabaseAdmin.from('device_loans').select('*, students(name, national_id, class_name, grade), devices(device_number, asset_tag, cart_id, carts(name, display_name))').order('checkout_at', { ascending: false }).limit(100)
+        const { data: loans, error } = await supabaseAdmin.from('device_loans').select('*, students(name, national_id, class_name, grade), teachers(name, national_id), devices(device_number, asset_tag, cart_id, carts(name, display_name))').order('checkout_at', { ascending: false }).limit(100)
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ loans: loans || [] })
       }

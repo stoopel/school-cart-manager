@@ -328,6 +328,41 @@ def start_explorer():
         except Exception:
             pass
 
+def force_internal_display():
+    """כיבוי מסכים חיצוניים והגבלת התצוגה למסך הראשי של המחשב בזמן נעילה.
+    תומך ב-Windows 10, Windows 11 וב-Win32 SetDisplayConfig API באופן שקוף.
+    """
+    # 1. קריאה ישירה ל-Win32 SetDisplayConfig (שקט, מהיר וללא חלון גרפי)
+    try:
+        flags = 0x00000080 | 0x00000001  # SDC_APPLY | SDC_TOPOLOGY_INTERNAL
+        if user32.SetDisplayConfig(0, None, 0, None, flags) == 0:
+            return
+    except Exception:
+        pass
+
+    # 2. גיבוי מבוסס DisplaySwitch.exe המותאם ל-Windows 11 (פרמטר מספרי 1)
+    try:
+        subprocess.run(
+            ["DisplaySwitch.exe", "1"],
+            capture_output=True,
+            timeout=2,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+    except Exception:
+        pass
+
+    # 3. גיבוי מבוסס DisplaySwitch.exe המותאם ל-Windows 10 (פרמטר /internal)
+    try:
+        subprocess.run(
+            ["DisplaySwitch.exe", "/internal"],
+            capture_output=True,
+            timeout=2,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+    except Exception:
+        pass
+
+
 BG = "#0a0f1e"; BG_CARD = "#131929"; BG_INPUT = "#1e2840"
 ACCENT = "#3b82f6"; ACCENT_DARK = "#1d4ed8"
 SUCCESS = "#22c55e"; ERROR = "#ef4444"; WARNING = "#f59e0b"
@@ -1056,8 +1091,8 @@ class LockScreen:
         install_keyboard_hook()
         set_task_manager_enabled(False)
         show_tray_icon(r.winfo_id())
+        force_internal_display()
         self._check_uninstall_loop()
-        self._check_watchdog_loop()
 
     # ── UI Build ──────────────────────────────────────────────
 
@@ -1976,6 +2011,7 @@ class LockScreen:
         def _do():
             install_keyboard_hook()
             set_task_manager_enabled(False)
+            force_internal_display()
             self.lbl_display.config(text="")
             self.root.deiconify()
             self.root.attributes("-topmost", True)
@@ -2057,20 +2093,6 @@ class LockScreen:
             sys.exit(0)
         self.root.after(500, self._check_uninstall_loop)
 
-    def _check_watchdog_loop(self):
-        import os, subprocess
-        lock_file = r"C:\Program Files\CartAgent\uninstalling.lock"
-        if os.path.exists(lock_file):
-            return
-        try:
-            r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cart_watchdog.exe"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            if "cart_watchdog.exe" not in r.stdout:
-                watchdog_path = r"C:\Program Files\CartAgent\cart_watchdog.exe"
-                if os.path.exists(watchdog_path):
-                    subprocess.Popen([watchdog_path], creationflags=subprocess.CREATE_NO_WINDOW)
-        except Exception:
-            pass
-        self.root.after(3000, self._check_watchdog_loop)
 
     def show_lesson_selection(self, lessons: list, on_select):
         """מציג מסך בחירת שיעור מתוך רשימה לתלמיד ששויך למספר שיעורים במקביל"""

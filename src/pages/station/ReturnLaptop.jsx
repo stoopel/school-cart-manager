@@ -228,7 +228,7 @@ export default function ReturnLaptop({ cart, onDone }) {
           </div>
 
           <div className="station-result-info" style={{ textAlign: 'right' }}>
-            <div>👤 <strong>{loan?.students?.name}</strong> – {loan?.students?.class_name}</div>
+            <div>👤 <strong>{loan?.teachers?.name || loan?.students?.name}</strong> – {loan?.teachers ? 'מורה' : (loan?.students?.class_name || '')}</div>
             <div>🕐 נלקח ב-{new Date(loan?.checkout_at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</div>
             <div>⏱️ משך: {duration(loan?.checkout_at)}</div>
           </div>
@@ -254,7 +254,7 @@ export default function ReturnLaptop({ cart, onDone }) {
             <div className="station-result-name">הוחזר בהצלחה!</div>
             <div className="station-result-info">
               <div>💻 מחשב מס' <strong>{device?.device_number}</strong> – {cart?.display_name || cart?.name}</div>
-              <div>👤 {loan?.students?.name}</div>
+              <div>👤 {loan?.teachers?.name || loan?.students?.name}{loan?.teachers ? ' (מורה)' : ''}</div>
               <div>⏱️ משך שימוש: {duration(loan?.checkout_at)}</div>
             </div>
           </div>

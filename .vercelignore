@@ -1,0 +1,9 @@
+cart-kiosk-android
+agent/build
+agent/dist
+agent/__pycache__
+agent/venv
+agent/env
+.git
+node_modules
+dist

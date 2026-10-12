@@ -60,8 +60,12 @@ BEGIN
     JOIN lesson_pre_assignments lpa ON lpa.lesson_id = l.id
     JOIN students s ON s.id = lpa.student_id
     LEFT JOIN teachers t ON t.id = l.teacher_id
-    WHERE s.national_id = entered_id 
-      AND l.status = 'active'
+    WHERE (
+        s.national_id = entered_id 
+        OR LTRIM(s.national_id, '0') = LTRIM(entered_id, '0')
+        OR LPAD(s.national_id, 9, '0') = LPAD(entered_id, 9, '0')
+    )
+    AND l.status = 'active'
     ORDER BY l.created_at DESC;
 END;
 $$ LANGUAGE plpgsql;

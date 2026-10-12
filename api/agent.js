@@ -82,7 +82,7 @@ export default async function handler(req, res) {
 
       const { data: devs, error: devErr } = await supabaseAdmin
         .from('devices')
-        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, checkout_at, digital_login_at, lesson_id, notes, students(id, national_id, name, class_name, grade, charge_strikes))')
+        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, teacher_id, checkout_at, digital_login_at, lesson_id, notes, students(id, national_id, name, class_name, grade, charge_strikes), teachers(id, national_id, name))')
         .eq('asset_tag', assetTag)
         .is('deleted_at', null)
         .eq('device_loans.status', 'active')
@@ -130,42 +130,47 @@ export default async function handler(req, res) {
 
       const loan = loans[0]
       const s = Array.isArray(loan.students) ? loan.students[0] : loan.students
+      const t = Array.isArray(loan.teachers) ? loan.teachers[0] : loan.teachers
 
-      // Check if this is a teacher loan (recorded with notes or student_id is null)
-      if (!s) {
+      // Check if this is a teacher loan (recorded with teacher_id, teachers relation, or legacy notes)
+      if (!s && (t || loan.teacher_id || loan.notes)) {
         let teacherNote = null
         if (loan.notes) {
           try { teacherNote = JSON.parse(loan.notes) } catch (e) {}
         }
-        if (teacherNote && teacherNote.isTeacher) {
-          const formattedTeacherLoan = {
-            device_id: dev.id,
-            device_number: dev.device_number,
-            cart_id: dev.cart_id,
-            cart_name: cartName || '',
-            loan_id: loan.id,
-            student_id: null,
-            teacher_id: teacherNote.teacherId || null,
-            national_id: teacherNote.nationalId || '',
-            student_name: teacherNote.teacherName || 'מורה',
-            teacher_name: teacherNote.teacherName || 'מורה',
-            is_teacher_loan: true,
-            class_name: 'מורה',
-            grade: 0,
-            charge_strikes: 0,
-            enable_charge_tracking: false,
-            checkout_at: loan.checkout_at,
-            digital_login_at: loan.digital_login_at
-          }
-          return res.status(200).json({
-            loan: formattedTeacherLoan,
-            device_id: dev.id,
-            registered: true,
-            cart_name: cartName || '',
-            device_number: dev.device_number
-          })
-        }
+        const teacherName = t?.name || teacherNote?.teacherName || 'מורה'
+        const teacherId = t?.id || loan.teacher_id || teacherNote?.teacherId || null
+        const nationalId = t?.national_id || teacherNote?.nationalId || ''
 
+        const formattedTeacherLoan = {
+          device_id: dev.id,
+          device_number: dev.device_number,
+          cart_id: dev.cart_id,
+          cart_name: cartName || '',
+          loan_id: loan.id,
+          student_id: null,
+          teacher_id: teacherId,
+          national_id: nationalId,
+          student_name: teacherName,
+          teacher_name: teacherName,
+          is_teacher_loan: true,
+          class_name: 'מורה',
+          grade: 0,
+          charge_strikes: 0,
+          enable_charge_tracking: false,
+          checkout_at: loan.checkout_at,
+          digital_login_at: loan.digital_login_at
+        }
+        return res.status(200).json({
+          loan: formattedTeacherLoan,
+          device_id: dev.id,
+          registered: true,
+          cart_name: cartName || '',
+          device_number: dev.device_number
+        })
+      }
+
+      if (!s) {
         return res.status(200).json({
           loan: null,
           device_id: dev.id,
@@ -376,60 +381,78 @@ export default async function handler(req, res) {
       const deviceId = body.deviceId || body.device_id
       const loanId = body.loanId || body.loan_id
 
-      if (!studentId) return res.status(400).json({ error: 'studentId is required' })
+      // ─── 1. מנוע מאוחד להוספה ואיפוס שביתות (add_strike ו-reset_strikes) ───
+      if (action === 'add_strike' || action === 'reset_strikes') {
+        if (!deviceId && !studentId) {
+          return res.status(400).json({ error: 'deviceId or studentId is required' })
+        }
 
-      if (action === 'add_strike') {
         let targetStudentId = studentId
         let targetLoanId = loanId
+
+        // איתור התלמיד האחרון לפי deviceId אם לא סופק studentId
         if (!targetStudentId && deviceId) {
           const { data: lastLoan } = await supabaseAdmin
             .from('device_loans')
             .select('id, student_id')
             .eq('device_id', deviceId)
-            .eq('status', 'returned')
-            .order('checkin_at', { ascending: false })
+            .order('checkout_at', { ascending: false })
             .limit(1)
             .maybeSingle()
-          if (lastLoan) {
-            targetStudentId = lastLoan.student_id
-            targetLoanId = lastLoan.id
-          }
+
+          targetStudentId = lastLoan?.student_id
+          targetLoanId = lastLoan?.id
         }
-        if (!targetStudentId) return res.status(400).json({ error: 'studentId or deviceId with return history is required' })
 
-        const { data: stu } = await supabaseAdmin.from('students').select('charge_strikes').eq('id', targetStudentId).single()
-        const newCount = (stu?.charge_strikes || 0) + 1
-        await supabaseAdmin.from('students').update({ charge_strikes: newCount }).eq('id', targetStudentId)
+        // אם אין תלמיד (למשל מחשב חדש או השאלת מורה) - לא קורסים ומחזירים 200 תקין
+        if (!targetStudentId) {
+          if (deviceId && action === 'add_strike') {
+            await supabaseAdmin.from('event_log').insert({
+              device_id: deviceId,
+              loan_id: null,
+              source: 'agent',
+              event_type: 'charge_strike_skipped',
+              payload: { reason: 'no_prior_student_loan' }
+            })
+          }
+          return res.status(200).json({ success: true, count: 0, skipped: true })
+        }
 
+        // שליפת כמות הפסילות הנוכחית של התלמיד
+        const { data: stu } = await supabaseAdmin
+          .from('students')
+          .select('charge_strikes')
+          .eq('id', targetStudentId)
+          .single()
+
+        const currentStrikes = stu?.charge_strikes || 0
+        const isAdd = action === 'add_strike'
+        const newCount = isAdd ? currentStrikes + 1 : 0
+        const now = new Date().toISOString()
+
+        // עדכון בטבלה: הוספת 1 או איפוס ל-0
+        const updateData = { charge_strikes: newCount }
+        if (!isAdd) updateData.last_charged_at = now
+
+        await supabaseAdmin.from('students').update(updateData).eq('id', targetStudentId)
+
+        // רישום האירוע בלוג
         if (deviceId) {
           await supabaseAdmin.from('event_log').insert({
             device_id: deviceId,
             loan_id: targetLoanId || null,
             source: 'agent',
-            event_type: 'charge_strike_added',
-            payload: { strike_count: newCount, student_id: targetStudentId }
+            event_type: isAdd ? 'charge_strike_added' : 'charge_strike_reset',
+            payload: isAdd ? { strike_count: newCount, student_id: targetStudentId } : { student_id: targetStudentId }
           })
         }
+
         return res.status(200).json({ success: true, count: newCount, student_id: targetStudentId })
       }
 
-      if (action === 'reset_strikes') {
-        const now = new Date().toISOString()
-        await supabaseAdmin.from('students').update({ charge_strikes: 0, last_charged_at: now }).eq('id', studentId)
-
-        if (deviceId) {
-          await supabaseAdmin.from('event_log').insert({
-            device_id: deviceId,
-            loan_id: loanId || null,
-            source: 'agent',
-            event_type: 'charge_strike_reset',
-            payload: {}
-          })
-        }
-        return res.status(200).json({ success: true })
-      }
-
+      // ─── 2. שליפת כמות שביתות לתלמיד (גיבוי) ───
       if (action === 'get_strikes') {
+        if (!studentId) return res.status(400).json({ error: 'studentId is required' })
         const { data: stu } = await supabaseAdmin.from('students').select('charge_strikes').eq('id', studentId).single()
         return res.status(200).json({ strikes: stu?.charge_strikes || 0 })
       }

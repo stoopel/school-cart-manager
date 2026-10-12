@@ -137,6 +137,7 @@ class CartAgent:
         self._rt_loan        = None   # Realtime: השאלה
         self._rt_lesson      = None   # Realtime: שיעור
         self._teacher_bypass = False  # האם נכנס מורה?
+        self._admin_bypass   = False  # מעקף חירום של מנהל מערכת
 
     def start(self):
         log.info(f"Agent v4 started. asset_tag={ASSET_TAG}")
@@ -194,7 +195,8 @@ class CartAgent:
 
         if is_admin:
             log.info("Admin code – bypassing loan and lesson checks")
-            self._teacher_bypass = True
+            self._admin_bypass = True
+            self._teacher_bypass = False
             self._do_unlock("מנהל מערכת")
             return
 
@@ -226,58 +228,55 @@ class CartAgent:
                     if self.screen:
                         self.screen.set_loan_info(self.loan_data)
                 elif live_loan and isinstance(live_loan, dict) and live_loan.get("unregistered"):
-                    # Check if teacher login bypass
-                    teacher = db.is_teacher(entered)
-                    if teacher:
-                        log.info(f"Teacher login bypass on unregistered device: {teacher['name']}")
-                        self._teacher_bypass = True
-                        self._teacher_info = teacher
-                        self.screen.root.after(0, lambda: [
-                            self.screen.set_verifying(False),
-                            self._do_unlock(teacher["name"])
-                        ])
-                        return
                     self.screen.root.after(0, lambda: [
                         self.screen.set_verifying(False),
                         self.screen.show_status("🚫 מחשב זה אינו רשום במערכת בית הספר.", "#ef4444")
                     ])
                     return
                 else:
-                    # Device is registered but unborrowed
-                    teacher = db.is_teacher(entered)
-                    if teacher:
-                        log.info(f"Teacher login bypass on unborrowed device: {teacher['name']}")
-                        self._teacher_bypass = True
-                        self._teacher_info = teacher
-                        self.screen.root.after(0, lambda: [
-                            self.screen.set_verifying(False),
-                            self._do_unlock(teacher["name"])
-                        ])
-                        return
                     self.screen.root.after(0, lambda: [
                         self.screen.set_verifying(False),
                         self.screen.show_status("פנה לתחנת העגלה לפני השימוש.", "#f59e0b")
                     ])
                     return
 
-            # 3. זיהוי האם מדובר במורה (מעקף מורה מאובטח כשיש השאלה פעילה)
-            teacher = db.is_teacher(entered)
-            if teacher:
-                log.info(f"Teacher login bypass: {teacher['name']}")
+            # 3. בדיקה האם זו השאלת מורה חוקית (Teacher Loan מעגלת ההשאלה)
+            if self.loan_data.get("is_teacher_loan"):
+                entered_clean = entered.lstrip('0')
+                loan_nid = str(self.loan_data.get("national_id", ""))
+                loan_nid_clean = loan_nid.lstrip('0')
+
+                if entered != loan_nid and entered_clean != loan_nid_clean:
+                    teacher_name = self.loan_data.get("teacher_name") or self.loan_data.get("student_name", "מורה")
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status(f"שגיאה: מחשב זה שייך ל-{teacher_name}.", "#ef4444")
+                    ])
+                    if self.device_id and self.loan_data.get("loan_id"):
+                        db.log_event(self.device_id, self.loan_data["loan_id"],
+                                     "auth_failed", {"prefix": entered[:3]})
+                    return
+
+                # תעודת הזהות תואמת למורה שהשאיל את המחשב בעגלה
+                teacher_name = self.loan_data.get("teacher_name") or self.loan_data.get("student_name", "מורה")
+                log.info(f"Legitimate teacher loan unlocked: {teacher_name}")
                 self._teacher_bypass = True
-                self._teacher_info = teacher
+                self._admin_bypass = False
+                self._teacher_info = {
+                    "id": self.loan_data.get("teacher_id"),
+                    "name": teacher_name
+                }
                 if self.device_id and self.loan_data.get("loan_id"):
+                    db.log_digital_login(self.loan_data["loan_id"], self.loan_data.get("device_id", self.device_id))
                     db.log_event(self.device_id, self.loan_data["loan_id"],
-                                 "teacher_login", {"name": teacher["name"]})
+                                 "teacher_login", {"name": teacher_name})
                 self.screen.root.after(0, lambda: [
                     self.screen.set_verifying(False),
-                    self._do_unlock(teacher["name"])
+                    self._do_unlock(teacher_name)
                 ])
                 return
 
-            # כעת כשברור שזה אינו מורה, נבדוק את מגבלות התלמיד
-
-            # 4. בדיקת strikes (עונשי אי-טעינה)
+            # 4. השאלת תלמיד - בדיקת strikes (עונשי אי-טעינה)
             enable_tracking = self.loan_data.get("enable_charge_tracking", True)
             strikes = self.loan_data.get("charge_strikes", 0) if enable_tracking else 0
             if enable_tracking and strikes >= MAX_STRIKES:
@@ -287,7 +286,7 @@ class CartAgent:
                 ])
                 return
 
-            # 5. וידוא התאמה מול מזהה ההשאלה הקיים של התלמיד
+            # 5. השאלת תלמיד - וידוא התאמה מול מזהה ההשאלה הקיים של התלמיד
             entered_clean = entered.lstrip('0')
             loan_nid = str(self.loan_data.get("national_id", ""))
             loan_nid_clean = loan_nid.lstrip('0')
@@ -305,6 +304,7 @@ class CartAgent:
 
             # 6. תלמיד תקין - בדיקה האם יש שיעור משויך מראש
             self._teacher_bypass = False
+            self._admin_bypass = False
 
             # מניעת לולאת נעילה בעקבות ריבוט / נעילה (Reboot/Lock loop bypass)
             # אם התלמיד כבר רשום לשיעור פעיל כלשהו במסד הנתונים כחלק מההשאלה שלו, נבצע מעקף פתיחה ישיר
@@ -518,6 +518,7 @@ class CartAgent:
         log.info("Teacher requested PC lock via floating widget.")
         self._unlocked = False
         self._teacher_bypass = False
+        self._admin_bypass = False
         if hasattr(self, "_teacher_info"):
             self._teacher_info = None
         if self.screen:
@@ -683,7 +684,7 @@ class CartAgent:
         while self._running:
             time.sleep(1)
             # חסימת מנהל משימות לתלמיד בזמן חיבור (ללא שינוי Registry)
-            if self._unlocked and not self._teacher_bypass and self.screen:
+            if self._unlocked and not self._teacher_bypass and not self._admin_bypass and self.screen:
                 self.screen.check_and_close_task_manager()
 
             if not self._lesson_timer:
@@ -839,6 +840,7 @@ class CartAgent:
             self.loan_data   = new_loan
             self._unlocked   = False
             self._teacher_bypass = False
+            self._admin_bypass = False
             self._teacher_info = None
             self._lesson_data = None
             self._lesson_timer = None
@@ -852,11 +854,12 @@ class CartAgent:
                     self.screen.relock(f"המחשב הוצא על שם: {borrower_name}")
                 else:
                     self.screen.relock("מחשב זה זמין לשימוש חדש.")
-        elif self._unlocked and not is_borrowed:
+        elif self._unlocked and not is_borrowed and not self._admin_bypass:
             log.info("Device is unlocked but loan state is unborrowed. Forcing relock.")
             self.loan_data = new_loan
             self._unlocked = False
             self._teacher_bypass = False
+            self._admin_bypass = False
             self._teacher_info = None
             self._lesson_data = None
             self._lesson_timer = None
@@ -974,7 +977,7 @@ class CartAgent:
                     if self.screen: self.screen.unfreeze()
                     self._check_charging_after_wake()
                     self._refresh_loan_state(f"wake {elapsed_time:.0f}s")
-                    if self._unlocked and not self._teacher_bypass and self._lesson_data:
+                    if self._unlocked and not self._teacher_bypass and not self._admin_bypass and self._lesson_data:
                         s_name = self.loan_data.get('student_name', '') if self.loan_data else ""
                         c_name = self.loan_data.get('class_name', '') if self.loan_data else ""
                         self.screen.show_lesson_widget(

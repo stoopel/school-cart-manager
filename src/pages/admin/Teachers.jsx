@@ -30,13 +30,39 @@ export default function Teachers() {
     e.preventDefault()
     setError('')
     setSaving(true)
-    const { error: err } = await supabase.from('teachers').insert({
-      national_id: form.national_id.trim(),
-      name:        form.name.trim(),
-      email:       form.email.trim() || null,
-    })
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({
+          scope: 'teachers',
+          action: 'save_teacher',
+          teacher: {
+            national_id: form.national_id.trim(),
+            name: form.name.trim(),
+            email: form.email.trim() || null,
+          }
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'שגיאה בשמירת המורה')
+        setSaving(false)
+        return
+      }
+      if (data.reactivated) {
+        alert('💡 מורה זה היה מושבת בארכיון והופעל מחדש בהצלחה עם הפרטים המעודכנים!')
+      }
+    } catch (err) {
+      setError(err.message || 'שגיאת תקשורת')
+      setSaving(false)
+      return
+    }
     setSaving(false)
-    if (err) { setError(err.message); return }
     setShowAdd(false)
     setForm(EMPTY)
     load()
@@ -49,10 +75,10 @@ export default function Teachers() {
   }
 
   async function deleteTeacher(id) {
-    if (!confirm('האם למחוק מורה זה?')) return
+    if (!confirm('האם למחוק / להשבית מורה זה?')) return
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      await fetch('/api/admin', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -64,8 +90,15 @@ export default function Teachers() {
           teacherId: id
         })
       })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'שגיאה במחיקת המורה')
+        return
+      }
     } catch (e) {
       console.error('Error deleting teacher:', e)
+      alert('שגיאת תקשורת במחיקת המורה')
+      return
     }
     load()
   }
@@ -96,9 +129,9 @@ export default function Teachers() {
         />
       </div>
 
-      {/* Alert - teacher is also admin bypass */}
+      {/* Alert */}
       <div className="alert alert-info" style={{ marginBottom: 16, fontSize: '0.85rem' }}>
-        💡 תעודת הזהות של המורה משמשת לכניסה ישירה למחשב ללא קוד שיעור.
+        💡 תעודת הזהות של המורה משמשת להשאלת מחשב למורה בעגלה ולכניסה לפורטל ניהול השיעורים.
         הקפד לוודא את הנתונים לפני ההוספה.
       </div>
 

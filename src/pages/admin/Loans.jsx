@@ -15,18 +15,28 @@ export default function Loans() {
   }, [])
 
   async function loadCarts() {
-    const { data } = await supabase.from('carts').select('id, name').order('name')
+    const { data } = await supabase
+      .from('carts')
+      .select('id, name, display_name')
+      .is('deleted_at', null)
+      .order('name')
     setCarts(data ?? [])
   }
 
   async function load() {
     setLoading(true)
+    const deviceRel = filter.cart
+      ? 'devices!inner(device_number, cart_id, carts(name, display_name))'
+      : 'devices(device_number, carts(name, display_name))'
+
     let q = supabase.from('device_loans').select(`
       id, checkout_at, checkin_at, status, checkout_method, digital_login_at,
       students(name, national_id, class_name),
-      devices(device_number, carts(name, display_name))
+      teachers(name, national_id),
+      ${deviceRel}
     `).order('checkout_at', { ascending: false }).limit(500)
 
+    if (filter.cart)   q = q.eq('devices.cart_id', filter.cart)
     if (filter.status) q = q.eq('status', filter.status)
     if (filter.date)   q = q.gte('checkout_at', filter.date + 'T00:00:00').lte('checkout_at', filter.date + 'T23:59:59')
 
@@ -52,9 +62,9 @@ export default function Loans() {
 
   function exportExcel() {
     const rows = loans.map(l => ({
-      'שם תלמיד':    l.students?.name ?? '',
-      'תעודת זהות':  l.students?.national_id ?? '',
-      'כיתה':        l.students?.class_name ?? '',
+      'שם שואל':     l.teachers?.name ? `${l.teachers.name} (מורה)` : (l.students?.name ?? ''),
+      'תעודת זהות':  l.teachers?.national_id || l.students?.national_id || '',
+      'כיתה / תפקיד': l.teachers ? 'מורה' : (l.students?.class_name ?? ''),
       'עגלה':        l.devices?.carts?.display_name || l.devices?.carts?.name || '',
       'מחשב':        l.devices?.device_number ?? '',
       'נלקח':        fmt(l.checkout_at),
@@ -86,6 +96,19 @@ export default function Loans() {
           value={filter.date}
           onChange={e => setFilter(f => ({ ...f, date: e.target.value }))}
         />
+        <select
+          className="form-select"
+          style={{ maxWidth: 180 }}
+          value={filter.cart}
+          onChange={e => setFilter(f => ({ ...f, cart: e.target.value }))}
+        >
+          <option value="">כל העגלות</option>
+          {carts.map(c => (
+            <option key={c.id} value={c.id}>
+              {c.display_name || c.name}
+            </option>
+          ))}
+        </select>
         <select className="form-select" style={{ maxWidth: 180 }} value={filter.status} onChange={e => setFilter(f => ({ ...f, status: e.target.value }))}>
           <option value="">כל הסטטוסים</option>
           <option value="active">פעיל</option>
@@ -106,8 +129,8 @@ export default function Loans() {
             <table>
               <thead>
                 <tr>
-                  <th>תלמיד</th>
-                  <th>כיתה</th>
+                  <th>שואל</th>
+                  <th>כיתה / תפקיד</th>
                   <th>עגלה</th>
                   <th>מחשב</th>
                   <th>נלקח</th>
@@ -119,8 +142,18 @@ export default function Loans() {
               <tbody>
                 {loans.map(l => (
                   <tr key={l.id}>
-                    <td style={{ fontWeight: 600 }}>{l.students?.name ?? '—'}</td>
-                    <td><span className="badge badge-info">{l.students?.class_name ?? '—'}</span></td>
+                    <td style={{ fontWeight: 600 }}>
+                      {l.teachers?.name ? (
+                        <span>{l.teachers.name} <span className="badge badge-primary" style={{ fontSize: '0.75rem', marginRight: 4 }}>מורה</span></span>
+                      ) : (
+                        l.students?.name ?? '—'
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge ${l.teachers ? 'badge-primary' : 'badge-info'}`}>
+                        {l.teachers ? 'מורה' : (l.students?.class_name ?? '—')}
+                      </span>
+                    </td>
                     <td>{l.devices?.carts?.display_name || l.devices?.carts?.name || '—'}</td>
                     <td>מס' {l.devices?.device_number ?? '—'}</td>
                     <td className="text-muted">{fmt(l.checkout_at)}</td>

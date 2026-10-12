@@ -31,8 +31,21 @@ export default async function handler(req, res) {
     try {
         const supabase = createClient(supabaseUrl, supabaseKey);
         
-        // 1. Fetch data from all tables
-        const tables = ["carts", "devices", "students", "lessons", "device_loans", "active_lessons"];
+        // 1. Fetch data from all system tables (Complete Disaster Recovery)
+        const tables = [
+            "carts",
+            "devices",
+            "students",
+            "teachers",
+            "lessons",
+            "lesson_participants",
+            "student_groups",
+            "student_group_members",
+            "lesson_pre_assignments",
+            "device_loans",
+            "allowed_admins",
+            "cart_status"
+        ];
         const backupData = {
             timestamp: new Date().toISOString(),
             data: {}
@@ -41,9 +54,11 @@ export default async function handler(req, res) {
         for (const table of tables) {
             const { data, error } = await supabase.from(table).select("*");
             if (error) {
-                throw new Error(`Failed to fetch table ${table}: ${error.message}`);
+                console.warn(`[Backup Warning] Failed to fetch table ${table}: ${error.message}`);
+                backupData.data[table] = { error: error.message };
+            } else {
+                backupData.data[table] = data || [];
             }
-            backupData.data[table] = data;
         }
 
         // 2. Initialize Cloudflare R2 client

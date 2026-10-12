@@ -24,6 +24,25 @@ SUCCESS = "#22c55e"
 TEXT_MAIN = "#f8fafc"
 TEXT_DIM = "#94a3b8"
 
+def load_obfuscated_config(filepath):
+    """
+    Reads config.json. First tries to parse it as plain UTF-8 JSON.
+    If that fails, decrypts using XOR with the pre-shared key.
+    """
+    try:
+        with open(filepath, "rb") as f:
+            data = f.read()
+        try:
+            return json.loads(data.decode("utf-8-sig"))
+        except Exception:
+            pass
+        key = b"CartAgentSecureKey2026!"
+        decrypted = bytes([b ^ key[i % len(key)] for i, b in enumerate(data)])
+        return json.loads(decrypted.decode("utf-8"))
+    except Exception:
+        return {}
+
+
 class UninstallerGUI:
     def __init__(self):
         self.root = tk.Tk()
@@ -111,12 +130,9 @@ class UninstallerGUI:
         ]
         for path in config_paths:
             if os.path.exists(path):
-                try:
-                    with open(path, "r", encoding="utf-8-sig") as f:
-                        config = json.load(f)
+                config = load_obfuscated_config(path)
+                if config:
                     break
-                except Exception:
-                    pass
 
         admin_code = config.get("admin_code", "")
         admin_code_hash = config.get("admin_code_hash", "")

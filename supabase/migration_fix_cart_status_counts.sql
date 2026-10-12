@@ -7,18 +7,40 @@ CREATE OR REPLACE FUNCTION sync_cart_total_devices()
 RETURNS TRIGGER AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    UPDATE carts
-    SET total_devices = (
-      SELECT COUNT(*)::INT FROM devices WHERE cart_id = OLD.cart_id AND deleted_at IS NULL
-    )
-    WHERE id = OLD.cart_id;
+    IF OLD.cart_id IS NOT NULL THEN
+      UPDATE carts
+      SET total_devices = (
+        SELECT COUNT(*)::INT FROM devices WHERE cart_id = OLD.cart_id AND deleted_at IS NULL
+      )
+      WHERE id = OLD.cart_id;
+    END IF;
     RETURN OLD;
-  ELSE
-    UPDATE carts
-    SET total_devices = (
-      SELECT COUNT(*)::INT FROM devices WHERE cart_id = NEW.cart_id AND deleted_at IS NULL
-    )
-    WHERE id = NEW.cart_id;
+  ELSIF TG_OP = 'UPDATE' THEN
+    -- If device was moved to another cart, sync OLD.cart_id as well
+    IF OLD.cart_id IS DISTINCT FROM NEW.cart_id AND OLD.cart_id IS NOT NULL THEN
+      UPDATE carts
+      SET total_devices = (
+        SELECT COUNT(*)::INT FROM devices WHERE cart_id = OLD.cart_id AND deleted_at IS NULL
+      )
+      WHERE id = OLD.cart_id;
+    END IF;
+
+    IF NEW.cart_id IS NOT NULL THEN
+      UPDATE carts
+      SET total_devices = (
+        SELECT COUNT(*)::INT FROM devices WHERE cart_id = NEW.cart_id AND deleted_at IS NULL
+      )
+      WHERE id = NEW.cart_id;
+    END IF;
+    RETURN NEW;
+  ELSE -- INSERT
+    IF NEW.cart_id IS NOT NULL THEN
+      UPDATE carts
+      SET total_devices = (
+        SELECT COUNT(*)::INT FROM devices WHERE cart_id = NEW.cart_id AND deleted_at IS NULL
+      )
+      WHERE id = NEW.cart_id;
+    END IF;
     RETURN NEW;
   END IF;
 END;

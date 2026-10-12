@@ -34,8 +34,8 @@ export default function Dashboard() {
     try {
       const [cartsRes, studentsRes, loansRes, unreturnedRes,
              strikesRes, lowBatRes] = await Promise.all([
-        supabase.from('carts').select('id', { count: 'exact', head: true }),
-        supabase.from('students').select('id', { count: 'exact', head: true }),
+        supabase.from('carts').select('id', { count: 'exact', head: true }).is('deleted_at', null),
+        supabase.from('students').select('id', { count: 'exact', head: true }).neq('is_active', false),
         supabase.from('device_loans')
           .select('id', { count: 'exact', head: true })
           .eq('status', 'active').is('checkin_at', null),
@@ -46,11 +46,13 @@ export default function Dashboard() {
         supabase.from('students')
           .select('id,name,class_name,charge_strikes,last_charged_at')
           .gt('charge_strikes', 0)
+          .neq('is_active', false)
           .order('charge_strikes', { ascending: false }),
 
         // מחשבים עם סוללה נמוכה (<30%) או לא מחוברים
         supabase.from('devices')
           .select('id,device_number,asset_tag,battery_level,is_charging,last_seen,cart_id,carts(name,display_name)')
+          .is('deleted_at', null)
           .not('battery_level', 'is', null)
           .lt('battery_level', 30)
           .order('battery_level', { ascending: true })
@@ -78,6 +80,7 @@ export default function Dashboard() {
     // Subscribe to realtime database changes for automatic refresh
     const channel = supabase
       .channel('dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'carts' }, () => { load() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'device_loans' }, () => { load() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => { load() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => { load() })

@@ -144,11 +144,11 @@ def get_active_loan(asset_tag):
 
 def log_digital_login(loan_id, device_id):
     """רושם כניסה דיגיטלית של התלמיד דרך ה-API"""
-    log_event(device_id, loan_id, "digital_login")
+    _api_post("login", {"loanId": loan_id, "deviceId": device_id})
 
 def log_digital_logout(loan_id, device_id):
     """רושם יציאה דיגיטלית ונעילה של המחשב דרך ה-API"""
-    log_event(device_id, loan_id, "digital_logout")
+    _api_post("logout", {"loanId": loan_id, "deviceId": device_id})
 
 def heartbeat(device_id, battery_level=None, is_charging=None):
     payload = {"deviceId": device_id}
@@ -169,7 +169,7 @@ def log_event(device_id, loan_id, event_type, payload=None):
     _api_post("heartbeat", {
         "deviceId": device_id,
         "loanId": loan_id,
-        "eventType": event_type,
+        "event_type": event_type,
         "payload": payload or {}
     })
 

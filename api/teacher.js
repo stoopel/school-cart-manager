@@ -32,6 +32,14 @@ export default async function handler(req, res) {
 
       if (error) return res.status(500).json({ error: error.message })
       const now = new Date()
+
+      // סגירה אוטומטית שקטה של שיעורים שזמנם עבר במסד הנתונים
+      await supabaseAdmin
+        .from('lessons')
+        .update({ status: 'ended' })
+        .eq('status', 'active')
+        .lte('end_time', now.toISOString())
+
       const lessons = (data || []).map(l => {
         if (l.status === 'active' && new Date(l.end_time) <= now) {
           return { ...l, status: 'ended' }

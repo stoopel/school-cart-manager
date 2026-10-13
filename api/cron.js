@@ -131,6 +131,19 @@ export default async function handler(req, res) {
             console.log(`Purged ${count} old event log rows from Supabase.`);
         }
 
+        // 6. Auto-close expired active lessons in Supabase
+        const { error: lessonExpireError, count: expiredLessonsCount } = await supabase
+            .from("lessons")
+            .update({ status: "ended" }, { count: "exact" })
+            .eq("status", "active")
+            .lte("end_time", new Date().toISOString());
+
+        if (lessonExpireError) {
+            console.error(`Failed to close expired lessons: ${lessonExpireError.message}`);
+        } else {
+            console.log(`Auto-closed ${expiredLessonsCount || 0} expired lessons.`);
+        }
+
         return res.status(200).json({
             success: true,
             message: "Backup, retention cleanup, and log purge completed successfully",

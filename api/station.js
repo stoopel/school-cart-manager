@@ -22,7 +22,7 @@ export default async function handler(req, res) {
         .is('deleted_at', null)
         .maybeSingle()
 
-      if (cartError || !cart) return res.status(444).json({ error: 'Cart not found' })
+      if (cartError || !cart) return res.status(400).json({ error: 'Cart not found' })
 
       const { data: statusData } = await supabaseAdmin
         .from('cart_status')
@@ -105,7 +105,7 @@ export default async function handler(req, res) {
           }
         }
 
-        if (!stu) return res.status(444).json({ error: 'תעודת זהות לא נמצאה במערכת. פנה למורה.' })
+        if (!stu) return res.status(400).json({ error: 'תעודת זהות לא נמצאה במערכת. פנה למורה.' })
 
         // 3. Check for existing active loans
         if (!isTeacher) {
@@ -185,7 +185,7 @@ export default async function handler(req, res) {
           targetDev = data
         }
 
-        if (!targetDev) return res.status(444).json({ error: 'מחשב לא נמצא במערכת.' })
+        if (!targetDev) return res.status(400).json({ error: 'מחשב לא נמצא במערכת.' })
 
         const { data: takenLoan } = await supabaseAdmin.from('device_loans').select('id').eq('device_id', targetDev.id).eq('status', 'active').is('checkin_at', null).maybeSingle()
         if (takenLoan) return res.status(400).json({ error: `מחשב מס' ${targetDev.device_number} כבר נלקח.` })
@@ -238,7 +238,7 @@ export default async function handler(req, res) {
         dev = data
       }
 
-      if (!dev) return res.status(444).json({ error: 'מחשב לא נמצא במערכת.' })
+      if (!dev) return res.status(400).json({ error: 'מחשב לא נמצא במערכת.' })
 
       const { data: activeLoan } = await supabaseAdmin.from('device_loans').select('*, students(name, class_name), teachers(name)').eq('device_id', dev.id).eq('status', 'active').is('checkin_at', null).maybeSingle()
       if (!activeLoan) return res.status(400).json({ error: `מחשב מס' ${dev.device_number} אינו מוגדר כמשואל כעת.` })

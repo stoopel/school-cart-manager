@@ -12,12 +12,17 @@ export default async function handler(req, res) {
     const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
     const r2BucketName = process.env.R2_BUCKET_NAME || "db-backups";
 
-    // Validate CRON_SECRET if configured
-    if (process.env.CRON_SECRET) {
-      const authHeader = req.headers.authorization
-      if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-        return res.status(401).json({ error: 'Unauthorized cron invocation' })
-      }
+    // Enforce strict authentication: Require valid CRON_SECRET or Service Role Key
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    const validSecrets = [process.env.CRON_SECRET, process.env.SUPABASE_SERVICE_ROLE_KEY].filter(Boolean);
+
+    if (validSecrets.length === 0) {
+      return res.status(500).json({ error: 'Server configuration error: No cron secret or service key configured' });
+    }
+
+    const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    if (!providedToken || !validSecrets.includes(providedToken)) {
+      return res.status(401).json({ error: 'Unauthorized cron invocation' });
     }
 
     if (!supabaseUrl || !supabaseKey) {

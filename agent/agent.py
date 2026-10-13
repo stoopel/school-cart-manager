@@ -896,8 +896,8 @@ class CartAgent:
     def _check_charging_after_wake(self):
         """משווה סוללה לפני/אחרי שינה ומחליט אם לרשום strike"""
         if not self.device_id: return
-        if not self.loan_data or not self.loan_data.get("student_id"):
-            log.info("Device is not currently borrowed by a student. Skipping charge check.")
+        if self.loan_data and self.loan_data.get("is_teacher_loan"):
+            log.info("Device is currently borrowed by a teacher. Skipping charge check.")
             return
 
         current, charging = get_battery_info()
@@ -906,9 +906,7 @@ class CartAgent:
         # אם הסוללה מלאה/טעונה (>= 90%) – נחשב כטעון בהצלחה ללא תנאי, נאפס סטרייקים ונצא
         if current >= 90:
             log.info(f"Battery is functionally full ({current}% >= 90%). Resetting strikes for student.")
-            db.reset_charge_strikes(self.loan_data["student_id"],
-                                    self.loan_data["device_id"],
-                                    self.loan_data["loan_id"])
+            db.reset_charge_strikes(student_id="", device_id=self.device_id, loan_id="")
             return
 
         saved = db.get_last_battery(self.device_id)
@@ -939,9 +937,7 @@ class CartAgent:
         # מי החזיר אחרון את המחשב?
         if delta >= 10:
             # הוטען ✅ – אפס strikes לתלמיד ששב
-            db.reset_charge_strikes(self.loan_data["student_id"],
-                                    self.loan_data["device_id"],
-                                    self.loan_data["loan_id"])
+            db.reset_charge_strikes(student_id="", device_id=self.device_id, loan_id="")
             log.info("Charge reset for student")
         else:
             # לא הוטען ❌ – מצא את מי שהחזיר אחרון (רק אם מעקב טעינה פעיל בעגלה)

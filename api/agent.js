@@ -390,18 +390,22 @@ export default async function handler(req, res) {
         let targetStudentId = studentId
         let targetLoanId = loanId
 
-        // איתור התלמיד האחרון לפי deviceId אם לא סופק studentId
-        if (!targetStudentId && deviceId) {
-          const { data: lastLoan } = await supabaseAdmin
+        // איתור התלמיד האחרון שהחזיר את המחשב לפי deviceId (חובה לסנן לפי status = 'returned' כדי לא להעניש את השואל החדש!)
+        if ((!targetStudentId || action === 'add_strike') && deviceId) {
+          const { data: lastReturnedLoan } = await supabaseAdmin
             .from('device_loans')
             .select('id, student_id')
             .eq('device_id', deviceId)
-            .order('checkout_at', { ascending: false })
+            .eq('status', 'returned')
+            .not('student_id', 'is', null)
+            .order('checkin_at', { ascending: false, nullsFirst: false })
             .limit(1)
             .maybeSingle()
 
-          targetStudentId = lastLoan?.student_id
-          targetLoanId = lastLoan?.id
+          if (lastReturnedLoan) {
+            targetStudentId = lastReturnedLoan.student_id
+            targetLoanId = lastReturnedLoan.id
+          }
         }
 
         // אם אין תלמיד (למשל מחשב חדש או השאלת מורה) - לא קורסים ומחזירים 200 תקין

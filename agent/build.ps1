@@ -1,4 +1,4 @@
-# build.ps1 - Enterprise compiler for CartAgent Suite
+﻿# build.ps1 - Enterprise compiler for CartAgent Suite
 $ErrorActionPreference = "Stop"
 
 Write-Host "===========================================" -ForegroundColor Green
@@ -44,3 +44,9 @@ Write-Host " Compilation completed successfully!" -ForegroundColor Green
 Write-Host " Target files are available under: .\dist\" -ForegroundColor Green
 Write-Host " The main distributable file is: dist\setup_agent.exe" -ForegroundColor Yellow
 Write-Host "===========================================" -ForegroundColor Green
+
+if (Test-Path "dist\setup_agent.exe") {
+    Write-Host "[*] Copying setup_agent.exe to ..\public\setup_agent.exe..." -ForegroundColor Cyan
+    Copy-Item -Path "dist\setup_agent.exe" -Destination "..\public\setup_agent.exe" -Force
+    Write-Host "[+] Updated ..\public\setup_agent.exe successfully!" -ForegroundColor Green
+}

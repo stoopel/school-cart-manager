@@ -126,11 +126,55 @@ export default async function handler(req, res) {
           }
         }
 
-        return res.status(200).json({ student: stu, isTeacher })
+        // 4. Check charge strikes if charge tracking is enabled for this cart
+        let strikeWarning = null
+        if (!isTeacher) {
+          const { data: cartData } = await supabaseAdmin
+            .from('carts')
+            .select('enable_charge_tracking')
+            .eq('id', cartId)
+            .maybeSingle()
+
+          const trackingEnabled = cartData ? cartData.enable_charge_tracking !== false : true
+
+          if (trackingEnabled) {
+            const strikes = Number(stu.charge_strikes) || 0
+            if (strikes >= 3) {
+              return res.status(403).json({
+                error: `⛔ חשבונך חסום (${strikes} עבירות אי-טעינה). לא ניתן להשאיל מחשב. יש לפנות לרכז המחשבים.`
+              })
+            }
+            if (strikes > 0) {
+              strikeWarning = `⚠️ שים לב: צברת ${strikes} מתוך 3 עבירות אי-טעינה! בסיום השימוש חובה לחבר את המחשב לכבל הטעינה בעגלה.`
+            }
+          }
+        }
+
+        return res.status(200).json({ student: stu, isTeacher, strikeWarning })
       }
 
       if (action === 'checkout') {
         if (!studentId) return res.status(400).json({ error: 'studentId is required' })
+
+        // Check if student is blocked by charge strikes on this cart
+        const { data: cartData } = await supabaseAdmin
+          .from('carts')
+          .select('enable_charge_tracking')
+          .eq('id', cartId)
+          .maybeSingle()
+
+        const trackingEnabled = cartData ? cartData.enable_charge_tracking !== false : true
+        if (trackingEnabled) {
+          const { data: stuCheck } = await supabaseAdmin
+            .from('students')
+            .select('charge_strikes')
+            .eq('id', studentId)
+            .maybeSingle()
+
+          if (stuCheck && (Number(stuCheck.charge_strikes) || 0) >= 3) {
+            return res.status(403).json({ error: '⛔ חשבונך חסום (3 עבירות אי-טעינה). לא ניתן להשאיל מחשב.' })
+          }
+        }
 
         let targetDev = null
         if (deviceId) {

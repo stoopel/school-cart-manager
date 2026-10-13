@@ -9,6 +9,7 @@ export default function TakeLaptop({ cart, onDone }) {
   const [idValue, setIdValue]   = useState('')
   const [student, setStudent]   = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [strikeWarning, setStrikeWarning] = useState('')
   const [result, setResult]     = useState(null)
   const [scanMode, setScanMode] = useState('qr')  // 'qr' | 'number'
   const [devices, setDevices]   = useState([])
@@ -84,6 +85,7 @@ export default function TakeLaptop({ cart, onDone }) {
       }
 
       setStudent(json.student)
+      setStrikeWarning(json.strikeWarning || '')
       setStep(STEPS.SCAN)
     } catch (err) {
       setErrorMsg('שגיאה בחיבור לשרת: ' + err.message)
@@ -136,6 +138,7 @@ export default function TakeLaptop({ cart, onDone }) {
   }
 
   async function safeGoBackToId() {
+    setStrikeWarning('')
     if (scanMode === 'qr' && scannerRef.current) {
       try {
         await scannerRef.current.stop()
@@ -234,6 +237,12 @@ export default function TakeLaptop({ cart, onDone }) {
         <span className="station-flow-title">שלום, {student?.name}! בחר מחשב</span>
       </div>
       <div className="station-flow-body">
+        {strikeWarning && (
+          <div className="alert alert-warning" style={{ width: '100%', maxWidth: 440, margin: '0 auto 16px', fontSize: '0.92rem', fontWeight: 600, textAlign: 'center', backgroundColor: '#fef3c7', borderColor: '#f59e0b', color: '#92400e', borderRadius: 8, padding: '12px 16px', border: '1px solid #f59e0b' }}>
+            {strikeWarning}
+          </div>
+        )}
+
         {/* Mode toggle */}
         {cart?.allow_manual_entry !== false && (
           <div className="flex gap-3">

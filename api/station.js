@@ -20,7 +20,7 @@ export default async function handler(req, res) {
         .select('id, name, display_name, location, allow_manual_entry, enable_charge_tracking')
         .eq('id', cartId)
         .is('deleted_at', null)
-        .single()
+        .maybeSingle()
 
       if (cartError || !cart) return res.status(444).json({ error: 'Cart not found' })
 
@@ -28,7 +28,7 @@ export default async function handler(req, res) {
         .from('cart_status')
         .select('available_devices, active_loans')
         .eq('id', cartId)
-        .single()
+        .maybeSingle()
 
       return res.status(200).json({
         cart,
@@ -178,10 +178,10 @@ export default async function handler(req, res) {
 
         let targetDev = null
         if (deviceId) {
-          const { data } = await supabaseAdmin.from('devices').select('*').eq('id', deviceId).eq('cart_id', cartId).is('deleted_at', null).single()
+          const { data } = await supabaseAdmin.from('devices').select('*').eq('id', deviceId).eq('cart_id', cartId).is('deleted_at', null).maybeSingle()
           targetDev = data
         } else if (deviceNumber) {
-          const { data } = await supabaseAdmin.from('devices').select('*').eq('cart_id', cartId).eq('device_number', deviceNumber).is('deleted_at', null).single()
+          const { data } = await supabaseAdmin.from('devices').select('*').eq('cart_id', cartId).eq('device_number', deviceNumber).is('deleted_at', null).maybeSingle()
           targetDev = data
         }
 
@@ -231,16 +231,16 @@ export default async function handler(req, res) {
       const isUUID = /^[0-9a-f-]{36}$/i.test(deviceIdOrNumber)
       let dev = null
       if (isUUID) {
-        const { data } = await supabaseAdmin.from('devices').select('*').eq('id', deviceIdOrNumber).eq('cart_id', cartId).is('deleted_at', null).single()
+        const { data } = await supabaseAdmin.from('devices').select('*').eq('id', deviceIdOrNumber).eq('cart_id', cartId).is('deleted_at', null).maybeSingle()
         dev = data
       } else {
-        const { data } = await supabaseAdmin.from('devices').select('*').eq('cart_id', cartId).eq('device_number', deviceIdOrNumber).is('deleted_at', null).single()
+        const { data } = await supabaseAdmin.from('devices').select('*').eq('cart_id', cartId).eq('device_number', deviceIdOrNumber).is('deleted_at', null).maybeSingle()
         dev = data
       }
 
       if (!dev) return res.status(444).json({ error: 'מחשב לא נמצא במערכת.' })
 
-      const { data: activeLoan } = await supabaseAdmin.from('device_loans').select('*, students(name, class_name), teachers(name)').eq('device_id', dev.id).eq('status', 'active').is('checkin_at', null).single()
+      const { data: activeLoan } = await supabaseAdmin.from('device_loans').select('*, students(name, class_name), teachers(name)').eq('device_id', dev.id).eq('status', 'active').is('checkin_at', null).maybeSingle()
       if (!activeLoan) return res.status(400).json({ error: `מחשב מס' ${dev.device_number} אינו מוגדר כמשואל כעת.` })
 
       if (activeLoan && activeLoan.teachers && !activeLoan.students) {

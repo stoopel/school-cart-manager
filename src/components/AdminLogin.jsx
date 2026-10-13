@@ -1,23 +1,33 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
-function FocusInput({ label, type, required, value, onChange, placeholder, autoFocus }) {
+function FocusInput({ label, type, value, onChange, placeholder, required = false, autoFocus = false }) {
   const [focused, setFocused] = useState(false)
   return (
-    <div>
-      <label style={{ display: 'block', color: '#94a3b8', fontSize: '0.85rem', marginBottom: 6, fontWeight: 600 }}>{label}</label>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+      <label style={{
+        fontSize: '0.85rem',
+        fontWeight: 600,
+        color: focused ? '#f59e0b' : '#94a3b8',
+        transition: 'color 0.2s',
+        display: 'flex',
+        justifyContent: 'space-between'
+      }}>
+        <span>{label}</span>
+        {required && <span style={{ color: '#ef4444', fontSize: '0.8rem' }}>*</span>}
+      </label>
       <input
         type={type}
-        required={required}
-        autoFocus={autoFocus}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
+        required={required}
+        autoFocus={autoFocus}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         style={{
           width: '100%',
-          background: 'rgba(255,255,255,0.04)',
+          background: 'rgba(255,255,255,0.03)',
           border: focused ? '1.5px solid #f59e0b' : '1.5px solid rgba(255,255,255,0.1)',
           borderRadius: 12,
           padding: '12px 14px',
@@ -37,6 +47,8 @@ function FocusInput({ label, type, required, value, onChange, placeholder, autoF
 
 export default function AdminLogin({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isApproved, setIsApproved] = useState(false)
+  const [checkingApproval, setCheckingApproval] = useState(true)
   const [user, setUser] = useState(null)
   const [mode, setMode] = useState('login') // 'login' | 'signup'
   const [email, setEmail] = useState('')
@@ -46,24 +58,58 @@ export default function AdminLogin({ children }) {
   const [loading, setLoading] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
 
-  // מאזינים לשינויים במצב החיבור של Supabase
+  async function verifyApproval(sessionUser) {
+    if (!sessionUser) {
+      setIsAuthenticated(false)
+      setIsApproved(false)
+      setUser(null)
+      setCheckingApproval(false)
+      return
+    }
+
+    setUser(sessionUser)
+    setIsAuthenticated(true)
+    setCheckingApproval(true)
+
+    try {
+      const { data: approved, error: rpcErr } = await supabase.rpc('is_admin_approved')
+      if (!rpcErr && typeof approved === 'boolean') {
+        setIsApproved(approved)
+      } else {
+        // Fallback: בדיקה ישירה מול טבלת allowed_admins
+        const userEmail = (sessionUser.email || '').trim().toLowerCase()
+        const { data: checkData } = await supabase
+          .from('allowed_admins')
+          .select('email')
+          .ilike('email', userEmail)
+          .maybeSingle()
+        setIsApproved(Boolean(checkData))
+      }
+    } catch (err) {
+      console.error('Error verifying admin approval:', err)
+      setIsApproved(false)
+    } finally {
+      setCheckingApproval(false)
+    }
+  }
+
   useEffect(() => {
-    // בדיקה ראשונית של סשן קיים
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        setIsAuthenticated(true)
-        setUser(session.user)
+        verifyApproval(session.user)
+      } else {
+        setCheckingApproval(false)
       }
     })
 
-    // האזנה לשינויים עתידיים (חיבור, התנתקות וכו')
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        setIsAuthenticated(true)
-        setUser(session.user)
+        verifyApproval(session.user)
       } else {
         setIsAuthenticated(false)
+        setIsApproved(false)
         setUser(null)
+        setCheckingApproval(false)
       }
     })
 
@@ -86,6 +132,8 @@ export default function AdminLogin({ children }) {
         })
         if (loginErr) {
           setError(loginErr.message === 'Invalid login credentials' ? 'אימייל או סיסמה שגויים' : loginErr.message)
+        } else if (data?.user) {
+          await verifyApproval(data.user)
         }
       } else {
         if (!name.trim()) {
@@ -105,10 +153,11 @@ export default function AdminLogin({ children }) {
         if (signupErr) {
           setError(signupErr.message)
         } else {
-          setSuccessMsg('מנהל נרשם בהצלחה! כעת ניתן להתחבר.')
-          // מעביר אוטומטית למצב התחברות ומנקה סיסמה
-          setMode('login')
+          setSuccessMsg('ההרשמה נקלטה בהצלחה! חשבונך נוצר וממתין לאישור מנהל המערכת הראשי.')
           setPassword('')
+          if (data?.user) {
+            await verifyApproval(data.user)
+          }
         }
       }
     } catch (err) {
@@ -118,10 +167,130 @@ export default function AdminLogin({ children }) {
     }
   }
 
-  if (isAuthenticated) {
+  // 1. מצב בדיקת הרשאות בטעינה
+  if (checkingApproval && isAuthenticated) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: '#060d1f',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'Heebo, sans-serif',
+        direction: 'rtl',
+        color: '#f1f5f9'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '3rem', marginBottom: 16 }}>🛡️</div>
+          <h3 style={{ margin: 0, fontWeight: 700, fontSize: '1.25rem', color: '#f59e0b' }}>בודק הרשאות ניהול...</h3>
+          <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginTop: 8 }}>מאמת את חשבונך מול רשימת המנהלים המורשים</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 2. משתמש מחובר ומאושר -> כניסה לממשק הניהול
+  if (isAuthenticated && isApproved) {
     return children
   }
 
+  // 3. משתמש מחובר אך אינו מאושר עדיין -> מסך המתנה לאישור
+  if (isAuthenticated && !isApproved) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: '#060d1f',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'Heebo, sans-serif',
+        direction: 'rtl',
+        padding: 24,
+      }}>
+        <div style={{
+          background: '#0d1526',
+          border: '1.5px solid rgba(245,158,11,0.4)',
+          borderRadius: 24,
+          padding: '40px 32px',
+          width: '100%',
+          maxWidth: 440,
+          boxShadow: '0 12px 40px rgba(245,158,11,0.15)',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '3.5rem', marginBottom: 16 }}>⏳</div>
+          <h2 style={{ color: '#f1f5f9', margin: '0 0 10px', fontSize: '1.5rem', fontWeight: 800 }}>
+            חשבונך ממתין לאישור מנהל
+          </h2>
+          <p style={{ color: '#94a3b8', fontSize: '0.95rem', margin: '0 0 24px', lineHeight: 1.5 }}>
+            ההרשמה נקלטה בהצלחה במערכת, אך טרם הוענקה לך הרשאת ניהול פעילה.
+          </p>
+
+          <div style={{
+            background: 'rgba(245,158,11,0.08)',
+            border: '1px solid rgba(245,158,11,0.25)',
+            borderRadius: 14,
+            padding: '16px',
+            marginBottom: 24,
+            textAlign: 'right',
+            fontSize: '0.9rem',
+            color: '#e2e8f0',
+            lineHeight: 1.6
+          }}>
+            <div><strong>משתמש:</strong> {user?.user_metadata?.name || 'מנהל חדש'}</div>
+            <div><strong>אימייל:</strong> {user?.email}</div>
+            <div style={{ marginTop: 8, color: '#f59e0b', fontWeight: 600 }}>
+              🛡️ סטטוס: ממתין לאישור המנהל הראשי (Pending Approval)
+            </div>
+          </div>
+
+          <p style={{ color: '#64748b', fontSize: '0.85rem', margin: '0 0 24px', lineHeight: 1.5 }}>
+            נא לפנות למנהל המערכת הראשי של בית הספר ולבקש ממנו להוסיף את כתובת המייל שלך ברשימת <strong>"מנהלים מורשים"</strong>.
+          </p>
+
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button
+              type="button"
+              onClick={() => verifyApproval(user)}
+              style={{
+                flex: 1,
+                padding: '12px 0',
+                borderRadius: 12,
+                border: 'none',
+                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                fontFamily: 'Heebo, sans-serif'
+              }}
+            >
+              🔄 בדוק שוב
+            </button>
+            <button
+              type="button"
+              onClick={() => supabase.auth.signOut()}
+              style={{
+                flex: 1,
+                padding: '12px 0',
+                borderRadius: 12,
+                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#94a3b8',
+                fontWeight: 600,
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                fontFamily: 'Heebo, sans-serif'
+              }}
+            >
+              🚪 התנתק
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 4. מסך התחברות / רישום רגיל
   return (
     <div style={{
       minHeight: '100vh',
@@ -148,7 +317,7 @@ export default function AdminLogin({ children }) {
           <div style={{ fontSize: '3rem', marginBottom: 12 }}>🛡️</div>
           <h2 style={{ color: '#f1f5f9', margin: 0, fontSize: '1.6rem', fontWeight: 800 }}>ממשק ניהול עגלות</h2>
           <p style={{ color: '#94a3b8', margin: '8px 0 0', fontSize: '0.9rem' }}>
-            {mode === 'login' ? 'התחבר לחשבון מנהל כדי להמשיך' : 'רישום חשבון מנהל חדש במערכת'}
+            {mode === 'login' ? 'התחבר לחשבון מנהל כדי להמשיך' : 'רישום חשבון מנהל חדש (ממתין לאישור)'}
           </p>
         </div>
 
@@ -283,7 +452,7 @@ export default function AdminLogin({ children }) {
               marginTop: 8
             }}
           >
-            {loading ? '⏳ מבצע פעולה...' : mode === 'login' ? 'התחבר למערכת' : 'צור חשבון מנהל'}
+            {loading ? '⏳ מבצע פעולה...' : mode === 'login' ? 'התחבר למערכת' : 'צור חשבון מנהל (ממתין לאישור)'}
           </button>
         </form>
       </div>

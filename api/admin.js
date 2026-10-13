@@ -22,6 +22,22 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'גישה נדחתה: טוקן אימות לא תקף או שפג תוקפו (Invalid or expired admin token)' })
     }
 
+    const userEmail = (authData.user.email || '').trim().toLowerCase()
+    if (!userEmail) {
+      return res.status(403).json({ error: 'גישה נדחתה: למשתמש אין כתובת אימייל משויכת' })
+    }
+
+    // בדיקת הרשאה מול רשימת המנהלים המורשים (allowed_admins)
+    const { data: isAllowed, error: allowErr } = await supabaseAdmin
+      .from('allowed_admins')
+      .select('email')
+      .ilike('email', userEmail)
+      .maybeSingle()
+
+    if (allowErr || !isAllowed) {
+      return res.status(403).json({ error: 'גישה נדחתה: חשבונך ממתין לאישור מנהל מערכת ראשי (Unauthorized: Account pending approval)' })
+    }
+
     const body = req.body || {}
     const { scope, action, cart, cartId, device, deviceId, student, studentId, teacher, teacherId, loanId, type, records } = body
 

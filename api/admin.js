@@ -140,6 +140,21 @@ export default async function handler(req, res) {
           return res.status(200).json({ student: result.data })
         } else {
           const cleanId = (student.national_id || '').trim()
+          const unpadded = cleanId.replace(/^0+/, '')
+          const padded9 = cleanId.padStart(9, '0')
+
+          // Teacher Shield: Disallow adding student if ID belongs to an active teacher
+          const { data: teacherMatch } = await supabaseAdmin
+            .from('teachers')
+            .select('id, name')
+            .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+            .eq('is_active', true)
+            .limit(1)
+
+          if (teacherMatch && teacherMatch.length > 0) {
+            return res.status(400).json({ error: `תעודת זהות זו שייכת למורה (${teacherMatch[0].name}). לא ניתן להוסיף מורה כתלמיד.` })
+          }
+
           const { data: existing } = await supabaseAdmin
             .from('students')
             .select('*')
@@ -252,11 +267,30 @@ export default async function handler(req, res) {
                 .single()
 
               if (reactErr) return res.status(500).json({ error: reactErr.message })
+
+              // Bidirectional Shield: Deactivate matching student records on reactivation
+              const unpadded = cleanId.replace(/^0+/, '')
+              const padded9 = cleanId.padStart(9, '0')
+              const allVariantIds = [...new Set([cleanId, unpadded, padded9])]
+              await supabaseAdmin
+                .from('students')
+                .update({ is_active: false, deleted_at: new Date().toISOString() })
+                .in('national_id', allVariantIds)
+
               return res.status(200).json({ teacher: reactivated, reactivated: true })
             } else {
               return res.status(400).json({ error: 'מורה עם תעודת זהות זו כבר קיים במערכת.' })
             }
           }
+
+          // Bidirectional Shield: Deactivate matching student records
+          const unpadded = cleanId.replace(/^0+/, '')
+          const padded9 = cleanId.padStart(9, '0')
+          const allVariantIds = [...new Set([cleanId, unpadded, padded9])]
+          await supabaseAdmin
+            .from('students')
+            .update({ is_active: false, deleted_at: new Date().toISOString() })
+            .in('national_id', allVariantIds)
 
           const result = await supabaseAdmin.from('teachers').insert({ ...teacher, is_active: true }).select().single()
           if (result.error) return res.status(500).json({ error: result.error.message })

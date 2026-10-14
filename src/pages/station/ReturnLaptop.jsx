@@ -11,6 +11,7 @@ export default function ReturnLaptop({ cart, onDone }) {
   const [device, setDevice]     = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [devices, setDevices]   = useState([])
+  const [submitting, setSubmitting] = useState(false)
   const scannerRef = useRef(null)
 
   useEffect(() => {
@@ -139,6 +140,8 @@ export default function ReturnLaptop({ cart, onDone }) {
   }
 
   async function confirmReturn() {
+    if (submitting) return
+    setSubmitting(true)
     try {
       const res = await fetch('/api/station', {
         method: 'POST',
@@ -148,12 +151,14 @@ export default function ReturnLaptop({ cart, onDone }) {
       const json = await res.json()
       if (!res.ok || json.error) {
         setErrorMsg(json.error || 'שגיאה בהחזרת המחשב. נסה שנית.')
+        setSubmitting(false)
         return
       }
       setStep(STEPS.SUCCESS)
       setTimeout(() => onDone(), 1500)
     } catch (err) {
       setErrorMsg('שגיאה בחיבור לשרת: ' + err.message)
+      setSubmitting(false)
     }
   }
 
@@ -234,8 +239,10 @@ export default function ReturnLaptop({ cart, onDone }) {
           </div>
 
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
-            <button className="btn btn-success btn-lg" onClick={confirmReturn}>✅ אשר החזרה</button>
-            <button className="btn btn-ghost btn-lg" onClick={() => { setStep(STEPS.SCAN); setLoan(null); setDevice(null); }}>ביטול</button>
+            <button className="btn btn-success btn-lg" onClick={confirmReturn} disabled={submitting}>
+              {submitting ? '⏳ מאשר החזרה...' : '✅ אשר החזרה'}
+            </button>
+            <button className="btn btn-ghost btn-lg" disabled={submitting} onClick={() => { setStep(STEPS.SCAN); setLoan(null); setDevice(null); setSubmitting(false); }}>ביטול</button>
           </div>
         </div>
       </div>

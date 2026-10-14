@@ -369,6 +369,20 @@ export default async function handler(req, res) {
         )
         const { data, error } = await supabaseAdmin.from('teachers').upsert(uniqueRecords, { onConflict: 'national_id' }).select()
         if (error) return res.status(500).json({ error: error.message })
+
+        // Bidirectional Shield: Clean up / deactivate any matching national IDs from students table
+        const teacherIds = uniqueRecords.map(r => r.national_id).filter(Boolean)
+        if (teacherIds.length > 0) {
+          const unpaddedIds = teacherIds.map(id => id.replace(/^0+/, ''))
+          const paddedIds = teacherIds.map(id => id.padStart(9, '0'))
+          const allVariantIds = [...new Set([...teacherIds, ...unpaddedIds, ...paddedIds])]
+
+          await supabaseAdmin
+            .from('students')
+            .update({ is_active: false, deleted_at: new Date().toISOString() })
+            .in('national_id', allVariantIds)
+        }
+
         return res.status(200).json({ success: true, count: data?.length || 0 })
       }
     }

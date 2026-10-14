@@ -292,6 +292,12 @@ export default function ImportCenter() {
             .insert({ name: row.name, national_id: cleanId })
           if (!postErr) inserted++
         }
+
+        // Deactivate any matching ID from students table to maintain clean separation
+        await supabase
+          .from('students')
+          .update({ is_active: false, deleted_at: new Date().toISOString() })
+          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
         setProgress({ current: i + 1, total: parsedData.rows.length, type: 'teachers' })
       }
       setSuccess(`✅ קליטת המורים הושלמה! יובאו ${inserted} מורים חדשים, ועדכנו ${updated} מורים קיימים.`)

@@ -1,3 +1,7 @@
+export const config = {
+  maxDuration: 60
+};
+
 import { createClient } from "@supabase/supabase-js";
 import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
@@ -57,12 +61,39 @@ export default async function handler(req, res) {
         };
 
         for (const table of tables) {
-            const { data, error } = await supabase.from(table).select("*");
-            if (error) {
-                console.warn(`[Backup Warning] Failed to fetch table ${table}: ${error.message}`);
-                backupData.data[table] = { error: error.message };
+            let allRows = [];
+            let from = 0;
+            const pageSize = 1000;
+            let fetchError = null;
+
+            while (true) {
+                const { data, error } = await supabase
+                    .from(table)
+                    .select("*")
+                    .range(from, from + pageSize - 1);
+
+                if (error) {
+                    console.warn(`[Backup Warning] Failed to fetch table ${table} (range ${from}-${from + pageSize - 1}): ${error.message}`);
+                    fetchError = error.message;
+                    break;
+                }
+
+                if (data && data.length > 0) {
+                    allRows = allRows.concat(data);
+                }
+
+                // If less than pageSize rows returned, we reached the end of the table
+                if (!data || data.length < pageSize) {
+                    break;
+                }
+
+                from += pageSize;
+            }
+
+            if (fetchError && allRows.length === 0) {
+                backupData.data[table] = { error: fetchError };
             } else {
-                backupData.data[table] = data || [];
+                backupData.data[table] = allRows;
             }
         }
 

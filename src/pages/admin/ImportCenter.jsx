@@ -503,7 +503,9 @@ export default function ImportCenter() {
           .upsert({
             national_id: cleanId,
             name: row.name,
-            class_name: row.class_name
+            class_name: row.class_name,
+            is_active: true,
+            deleted_at: null
           }, { onConflict: 'national_id' })
           .select('id')
           .single()

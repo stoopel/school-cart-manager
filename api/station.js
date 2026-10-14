@@ -80,24 +80,15 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'תלמיד זה מוגדר כלא-פעיל במערכת. פנה למנהל.' })
         }
 
-        // 2. If not found in students, search in teachers table
+        // 2. If not found in students, verify via secure teacher RPC
         if (!stu) {
-          const { data: teachers, error: tErr } = await supabaseAdmin
-            .from('teachers')
-            .select('*')
-            .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
-            .limit(1)
-
-          if (teachers && teachers.length > 0) {
-            const t = teachers[0]
-            if (t.is_active === false) {
-              return res.status(400).json({ error: 'מורה זה מוגדר כלא-פעיל במערכת. פנה למנהל.' })
-            }
+          const { data: resRpc } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: cleanId })
+          if (resRpc && resRpc.is_valid) {
             isTeacher = true
             stu = {
-              id: t.id,
-              national_id: t.national_id,
-              name: t.name,
+              id: resRpc.teacher_id,
+              national_id: resRpc.national_id,
+              name: resRpc.teacher_name,
               class_name: 'מורה',
               grade: 0,
               is_teacher: true
@@ -193,12 +184,22 @@ export default async function handler(req, res) {
         const validMethod = (checkoutMethod === 'qr_scan' || checkoutMethod === 'manual_number') ? checkoutMethod : 'manual_number'
 
         // Check if studentId is a teacher ID
-        const { data: teacherRecord } = await supabaseAdmin.from('teachers').select('id, name, national_id').eq('id', studentId).eq('is_active', true).maybeSingle()
+        let isTeacher = body.isTeacher === true || !!body.teacherId
+        let teacherId = isTeacher ? (body.teacherId || studentId) : null
+
+        if (!isTeacher) {
+          const { data: stuRecord } = await supabaseAdmin.from('students').select('id').eq('id', studentId).maybeSingle()
+          if (!stuRecord) {
+            // Not a student ID in students table -> teacher checkout
+            isTeacher = true
+            teacherId = studentId
+          }
+        }
 
         const insertPayload = {
           device_id: targetDev.id,
-          student_id: teacherRecord ? null : studentId,
-          teacher_id: teacherRecord ? teacherRecord.id : null,
+          student_id: isTeacher ? null : studentId,
+          teacher_id: teacherId,
           notes: null,
           checkout_method: validMethod,
           status: 'active'

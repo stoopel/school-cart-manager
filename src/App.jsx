@@ -8,7 +8,6 @@ import Carts       from './pages/admin/Carts'
 import Loans       from './pages/admin/Loans'
 import Labels      from './pages/admin/Labels'
 import StationHome from './pages/station/StationHome'
-import TeacherApp  from './pages/teacher/TeacherApp'
 import TeacherAppPremium from './pages/teacher/TeacherAppPremium'
 import LandingPage from './pages/LandingPage'
 import AdminLogin  from './components/AdminLogin'
@@ -43,7 +42,7 @@ export default function App() {
 
         {/* פורטל מורים */}
         <Route path="/teacher" element={<TeacherAppPremium />} />
-        <Route path="/teacher-legacy" element={<TeacherApp />} />
+        <Route path="/teacher-legacy" element={<Navigate to="/teacher" replace />} />
 
         {/* ברירת מחדל */}
         <Route path="*" element={<Navigate to="/" replace />} />

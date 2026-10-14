@@ -296,7 +296,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ loans: loans || [] })
       }
       if (action === 'force_return') {
-        const { error } = await supabaseAdmin.from('device_loans').update({ checkin_at: new Date().toISOString(), status: 'returned', return_method: 'admin' }).eq('id', loanId)
+        const { error } = await supabaseAdmin.from('device_loans').update({ checkin_at: new Date().toISOString(), status: 'returned', return_method: 'admin' }).eq('id', loanId).eq('status', 'active')
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ success: true })
       }

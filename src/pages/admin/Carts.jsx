@@ -251,7 +251,7 @@ export default function Carts() {
 
   async function forceReturn(loanId) {
     if (!confirm('לסגור השאלה זו בכוח?')) return
-    await supabase.from('device_loans').update({ status: 'force_closed', checkin_at: new Date().toISOString(), return_method: 'admin' }).eq('id', loanId)
+    await supabase.from('device_loans').update({ status: 'force_closed', checkin_at: new Date().toISOString(), return_method: 'admin' }).eq('id', loanId).eq('status', 'active')
     loadDevices(selectedCart.id)
     loadCarts()
   }

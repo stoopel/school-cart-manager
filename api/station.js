@@ -257,6 +257,7 @@ export default async function handler(req, res) {
           .from('device_loans')
           .update({ checkin_at: new Date().toISOString(), status: 'returned', return_method: 'cart_station' })
           .eq('id', loanId)
+          .eq('status', 'active')
 
         if (updateErr) return res.status(500).json({ error: 'שגיאה בהחזרת המחשב. נסה שוב.' })
         return res.status(200).json({ success: true })

@@ -46,7 +46,7 @@ function LessonCard({ lesson, onEnd, onToggleLock, onRefresh }) {
   async function handleEnd() {
     if (!confirm(`לסגור את השיעור עם קוד ${lesson.lesson_code}?`)) return
     setEnding(true)
-    await supabase.from('lessons').update({ status: 'ended' }).eq('id', lesson.id)
+    await supabase.from('lessons').update({ status: 'ended', end_time: new Date().toISOString() }).eq('id', lesson.id)
     onEnd()
   }
 

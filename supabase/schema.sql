@@ -82,6 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_loans_student_status ON device_loans(student_id, 
 CREATE INDEX IF NOT EXISTS idx_loans_device_status ON device_loans(device_id, status);
 CREATE INDEX IF NOT EXISTS idx_devices_cart ON devices(cart_id);
 CREATE INDEX IF NOT EXISTS idx_event_log_device ON event_log(device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_event_log_created_at ON event_log(created_at);
 
 -- ================================================
 -- VIEW: מחשבים שלא הוחזרו

@@ -63,8 +63,8 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
     }
   }, [isScheduled, secUntilStart, onRefresh, lesson.id])
 
-  const loadAssignments = useCallback(async () => {
-    setLoadingAssign(true)
+  const loadAssignments = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoadingAssign(true)
     const { data: lpa } = await supabase
       .from('lesson_pre_assignments')
       .select('student_id, students(name, class_name)')
@@ -83,22 +83,34 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
       class_name: item.students?.class_name ?? '',
       isPresent: participantSet.has(item.student_id)
     })))
-    setLoadingAssign(false)
+    if (!isSilent) setLoadingAssign(false)
   }, [lesson.id])
 
   useEffect(() => {
     loadAssignments()
   }, [loadAssignments])
 
+  // Realtime update when students join the lesson + Smart Fallback Polling (12s)
   useEffect(() => {
     const channel = supabase
       .channel(`lesson-participants-${lesson.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lesson_participants', filter: `lesson_id=eq.${lesson.id}` }, () => {
-        loadAssignments()
+        loadAssignments(true)
       })
       .subscribe()
-    return () => supabase.removeChannel(channel)
-  }, [lesson.id, loadAssignments])
+
+    // Smart Fallback Polling: אם חיבורי Realtime נחסמים/מוגבלים (תקרת 200 חיבורים או רשת בי"ס), נרענן שקט כל 12 שניות
+    const fallbackTimer = setInterval(() => {
+      if (lesson.status === 'active') {
+        loadAssignments(true)
+      }
+    }, 12000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(fallbackTimer)
+    }
+  }, [lesson.id, lesson.status, loadAssignments])
 
   async function act(update) {
     setBusy(true)

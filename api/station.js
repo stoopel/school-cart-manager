@@ -177,7 +177,24 @@ export default async function handler(req, res) {
           targetDev = data
         }
 
-        if (!targetDev) return res.status(400).json({ error: 'מחשב לא נמצא במערכת.' })
+        if (!targetDev) {
+          if (deviceId) {
+            const { data: otherDev } = await supabaseAdmin
+              .from('devices')
+              .select('device_number, carts(name, display_name)')
+              .eq('id', deviceId)
+              .is('deleted_at', null)
+              .maybeSingle()
+
+            if (otherDev) {
+              const otherCartName = otherDev.carts?.display_name || otherDev.carts?.name || 'עגלה אחרת'
+              return res.status(400).json({
+                error: `מחשב מס' ${otherDev.device_number} שייך ל${otherCartName}. יש להשאילו מעמדת ${otherCartName}.`
+              })
+            }
+          }
+          return res.status(400).json({ error: 'מחשב לא נמצא במערכת.' })
+        }
 
         const { data: takenLoan } = await supabaseAdmin.from('device_loans').select('id').eq('device_id', targetDev.id).eq('status', 'active').is('checkin_at', null).maybeSingle()
         if (takenLoan) return res.status(400).json({ error: `מחשב מס' ${targetDev.device_number} כבר נלקח.` })
@@ -257,10 +274,61 @@ export default async function handler(req, res) {
         dev = data
       }
 
-      if (!dev) return res.status(400).json({ error: 'מחשב לא נמצא במערכת.' })
+      if (!dev) {
+        if (isUUID) {
+          const { data: otherDev } = await supabaseAdmin
+            .from('devices')
+            .select('device_number, carts(name, display_name)')
+            .eq('id', deviceIdOrNumber)
+            .is('deleted_at', null)
+            .maybeSingle()
+
+          if (otherDev) {
+            const otherCartName = otherDev.carts?.display_name || otherDev.carts?.name || 'עגלה אחרת'
+            return res.status(400).json({
+              error: `מחשב מס' ${otherDev.device_number} שייך ל${otherCartName}. יש להחזירו לעמדת ${otherCartName}.`
+            })
+          }
+        } else {
+          const { data: otherDevs } = await supabaseAdmin
+            .from('devices')
+            .select('device_number, carts(name, display_name)')
+            .eq('device_number', deviceIdOrNumber)
+            .is('deleted_at', null)
+
+          if (otherDevs && otherDevs.length > 0) {
+            const cartNames = [...new Set(otherDevs.map(d => d.carts?.display_name || d.carts?.name).filter(Boolean))]
+            if (cartNames.length > 0) {
+              return res.status(400).json({
+                error: `מחשב מס' ${deviceIdOrNumber} אינו קיים בעגלה זו (קיים ב: ${cartNames.join(', ')}). יש להחזירו לעמדה המתאימה.`
+              })
+            }
+          }
+        }
+        return res.status(400).json({ error: 'מחשב לא נמצא במערכת.' })
+      }
 
       const { data: activeLoan } = await supabaseAdmin.from('device_loans').select('*, students(name, class_name), teachers(name)').eq('device_id', dev.id).eq('status', 'active').is('checkin_at', null).maybeSingle()
-      if (!activeLoan) return res.status(400).json({ error: `מחשב מס' ${dev.device_number} אינו מוגדר כמשואל כעת.` })
+      if (!activeLoan) {
+        if (!isUUID) {
+          const { data: otherDevLoans } = await supabaseAdmin
+            .from('device_loans')
+            .select('devices!inner(device_number, carts(name, display_name))')
+            .eq('devices.device_number', dev.device_number)
+            .eq('status', 'active')
+            .is('checkin_at', null)
+
+          if (otherDevLoans && otherDevLoans.length > 0) {
+            const otherCartNames = [...new Set(otherDevLoans.map(l => l.devices?.carts?.display_name || l.devices?.carts?.name).filter(Boolean))]
+            if (otherCartNames.length > 0) {
+              return res.status(400).json({
+                error: `מחשב מס' ${dev.device_number} אינו מושאל מעגלה זו (אך מושאל כעת מ: ${otherCartNames.join(', ')}). יש להחזירו לעמדה המתאימה.`
+              })
+            }
+          }
+        }
+        return res.status(400).json({ error: `מחשב מס' ${dev.device_number} אינו מוגדר כמשואל כעת.` })
+      }
 
       if (activeLoan && activeLoan.teachers && !activeLoan.students) {
         activeLoan.students = {

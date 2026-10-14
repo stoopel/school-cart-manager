@@ -11,13 +11,23 @@ export default function Labels() {
   const printRef = useRef()
 
   useEffect(() => {
-    supabase.from('carts').select('*').order('name').then(({ data }) => setCarts(data ?? []))
+    supabase
+      .from('carts')
+      .select('id, name, display_name, location')
+      .is('deleted_at', null)
+      .order('name')
+      .then(({ data }) => setCarts(data ?? []))
   }, [])
 
   async function loadDevices(cart) {
     setSelected(cart)
     setLoading(true)
-    const { data } = await supabase.from('devices').select('*').eq('cart_id', cart.id).order('device_number')
+    const { data } = await supabase
+      .from('devices')
+      .select('id, device_number, asset_tag')
+      .eq('cart_id', cart.id)
+      .is('deleted_at', null)
+      .order('device_number')
     // Generate QR codes for each device
     const withQR = await Promise.all((data ?? []).map(async d => ({
       ...d,

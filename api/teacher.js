@@ -61,7 +61,13 @@ export default async function handler(req, res) {
       const durationMins = parseInt(minutes, 10) || 45
       const now = new Date()
       const endTime = new Date(now.getTime() + durationMins * 60000)
-      const lessonCode = Math.floor(1000 + Math.random() * 9000).toString()
+      let lessonCode
+      const { data: generatedCode, error: codeErr } = await supabaseAdmin.rpc('generate_lesson_code')
+      if (!codeErr && generatedCode) {
+        lessonCode = String(generatedCode)
+      } else {
+        lessonCode = Math.floor(1000 + Math.random() * 9000).toString()
+      }
 
       const { data: newLesson, error } = await supabaseAdmin
         .from('lessons')

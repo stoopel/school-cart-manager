@@ -398,7 +398,7 @@ export default async function handler(req, res) {
             .from('device_loans')
             .select('id, student_id')
             .eq('device_id', deviceId)
-            .eq('status', 'returned')
+            .in('status', ['returned', 'force_closed'])
             .not('student_id', 'is', null)
             .order('checkin_at', { ascending: false, nullsFirst: false })
             .limit(1)

@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION public.handle_returned_laptop_disconnect()
 RETURNS TRIGGER AS $$
 BEGIN
     -- If the device loan status changes to 'returned' (checked-in)
-    IF NEW.status = 'returned' AND OLD.status = 'active' THEN
+    IF NEW.status IN ('returned', 'force_closed') AND OLD.status = 'active' THEN
         -- Set digital_logout_at to checkin_at if not already set
         IF NEW.digital_logout_at IS NULL THEN
             NEW.digital_logout_at := NEW.checkin_at;

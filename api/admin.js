@@ -55,6 +55,19 @@ export default async function handler(req, res) {
         return res.status(200).json({ cart: result.data })
       }
       if (action === 'delete_cart') {
+        // 1. חסימת מחיקת עגלה אם קיימות השאלות פעילות על מחשבים בעגלה זו
+        const { data: activeCartLoans } = await supabaseAdmin
+          .from('device_loans')
+          .select('id, devices!inner(cart_id)')
+          .eq('devices.cart_id', cartId)
+          .eq('status', 'active')
+          .is('checkin_at', null)
+          .limit(1)
+
+        if (activeCartLoans && activeCartLoans.length > 0) {
+          return res.status(400).json({ error: 'לא ניתן למחוק עגלה כאשר ישנם מחשבים מושאלים פעילים בעגלה זו. יש להחזיר את כל המחשבים תחילה.' })
+        }
+
         const { error } = await supabaseAdmin.from('carts').update({ deleted_at: new Date().toISOString() }).eq('id', cartId)
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ success: true })
@@ -94,6 +107,19 @@ export default async function handler(req, res) {
         return res.status(200).json({ device: result.data })
       }
       if (action === 'delete_device') {
+        // 1. חסימת מחיקת מחשב אם הוא מושאל כרגע
+        const { data: activeDevLoans } = await supabaseAdmin
+          .from('device_loans')
+          .select('id')
+          .eq('device_id', deviceId)
+          .eq('status', 'active')
+          .is('checkin_at', null)
+          .limit(1)
+
+        if (activeDevLoans && activeDevLoans.length > 0) {
+          return res.status(400).json({ error: 'לא ניתן למחוק מחשב שמושאל כרגע לתלמיד או למורה. יש להחזירו תחילה לתחנת העגלה.' })
+        }
+
         const { error } = await supabaseAdmin.from('devices').update({ deleted_at: new Date().toISOString() }).eq('id', deviceId)
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ success: true })

@@ -288,6 +288,8 @@ export default async function handler(req, res) {
           .from('students')
           .select('id, national_id, name, class_name, charge_strikes')
           .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .eq('is_active', true)
+          .is('deleted_at', null)
           .limit(1)
 
         if (error || !stus || stus.length === 0) return res.status(404).json({ error: 'Student not found' })

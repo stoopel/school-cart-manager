@@ -71,6 +71,7 @@ export default async function handler(req, res) {
           .from('students')
           .select('*')
           .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .is('deleted_at', null)
           .limit(1)
 
         let stu = stus && stus.length > 0 ? stus[0] : null
@@ -193,6 +194,23 @@ export default async function handler(req, res) {
             // Not a student ID in students table -> teacher checkout
             isTeacher = true
             teacherId = studentId
+          } else {
+            // Re-verify that student does not have another active unreturned loan
+            const { data: existingLoan } = await supabaseAdmin
+              .from('device_loans')
+              .select('id, devices(device_number, carts(name, display_name))')
+              .eq('student_id', studentId)
+              .eq('status', 'active')
+              .is('checkin_at', null)
+              .maybeSingle()
+
+            if (existingLoan) {
+              const devNum = existingLoan.devices?.device_number
+              const cartName = existingLoan.devices?.carts?.display_name || existingLoan.devices?.carts?.name || 'העגלה'
+              return res.status(400).json({
+                error: `כבר קיים מחשב מושאל פעיל על שמך (מחשב ${devNum} מ${cartName}). יש להחזירו לפני לקיחת מחשב נוסף.`
+              })
+            }
           }
         }
 

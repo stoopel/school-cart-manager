@@ -233,6 +233,11 @@ export default async function handler(req, res) {
       if (action === 'reset_strikes') {
         const { error } = await supabaseAdmin.from('students').update({ charge_strikes: 0, last_charged_at: new Date().toISOString() }).eq('id', studentId)
         if (error) return res.status(500).json({ error: error.message })
+        await supabaseAdmin.from('event_log').insert({
+          source: 'admin',
+          event_type: 'charge_strike_reset',
+          payload: { student_id: studentId, admin_email: userEmail }
+        })
         return res.status(200).json({ success: true })
       }
     }

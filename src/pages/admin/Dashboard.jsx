@@ -94,11 +94,33 @@ export default function Dashboard() {
   async function clearStrike(student) {
     if (!confirm(`לנקות ${student.charge_strikes} strikes של ${student.name}?`)) return
     setClearing(student.id)
-    await supabase.from('students')
-      .update({ charge_strikes: 0, last_charged_at: new Date().toISOString() })
-      .eq('id', student.id)
-    setClearing(null)
-    load()
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({
+          scope: 'students',
+          action: 'reset_strikes',
+          studentId: student.id
+        })
+      })
+      if (!res.ok) {
+        await supabase.from('students')
+          .update({ charge_strikes: 0, last_charged_at: new Date().toISOString() })
+          .eq('id', student.id)
+      }
+    } catch {
+      await supabase.from('students')
+        .update({ charge_strikes: 0, last_charged_at: new Date().toISOString() })
+        .eq('id', student.id)
+    } finally {
+      setClearing(null)
+      load()
+    }
   }
 
   function formatDuration(minutes) {

@@ -320,7 +320,7 @@ export default async function handler(req, res) {
         const { data: lessonData } = await supabaseAdmin.from('lessons').select('id, end_time, status, teachers(name)').eq('id', lessonId).maybeSingle()
         if (!lessonData || lessonData.status !== 'active') return res.status(400).json({ error: 'Lesson is not active' })
 
-        await supabaseAdmin.from('lesson_participants').insert({ lesson_id: lessonId, student_id: studentId, loan_id: loanId, device_id: deviceId })
+        await supabaseAdmin.from('lesson_participants').upsert({ lesson_id: lessonId, student_id: studentId, loan_id: loanId, device_id: deviceId }, { onConflict: 'lesson_id, device_id' })
         await supabaseAdmin.from('device_loans').update({ lesson_id: lessonId }).eq('id', loanId)
         const formattedLesson = {
           id: lessonData.id,

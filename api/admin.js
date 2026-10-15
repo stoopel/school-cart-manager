@@ -375,7 +375,7 @@ export default async function handler(req, res) {
               if (isTeacher) {
                 skippedTeachersCount++
               } else {
-                acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
+                acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId, is_active: true, deleted_at: null }
               }
             }
             return acc
@@ -396,7 +396,7 @@ export default async function handler(req, res) {
           records.reduce((acc, r) => {
             if (r.national_id) {
               const cleanId = String(r.national_id).trim()
-              acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId }
+              acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId, is_active: true }
             }
             return acc
           }, {})

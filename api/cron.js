@@ -53,7 +53,7 @@ export default async function handler(req, res) {
             "lesson_pre_assignments",
             "device_loans",
             "allowed_admins",
-            "cart_status"
+            "event_log"
         ];
         const backupData = {
             timestamp: new Date().toISOString(),

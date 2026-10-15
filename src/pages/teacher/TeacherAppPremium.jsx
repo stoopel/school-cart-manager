@@ -205,7 +205,7 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
                 {isLocked ? 'שחרר' : 'נעל'}
               </button>
               <button
-                onClick={() => { if (confirm('לסיים שיעור?')) act({ status: 'ended' }) }}
+                onClick={() => { if (confirm('לסיים שיעור?')) act({ status: 'ended', end_time: new Date().toISOString() }) }}
                 disabled={busy}
                 className="flex items-center justify-center gap-2 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm font-body hover:bg-red-100 active:scale-[0.98] transition-all"
               >

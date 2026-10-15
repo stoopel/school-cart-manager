@@ -119,6 +119,10 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
   }
 
   async function extendLesson(minutes) {
+    if (new Date(lesson.end_time).getTime() <= Date.now()) {
+      alert('לא ניתן להאריך שיעור שזמנו כבר הסתיים.')
+      return
+    }
     setBusy(true)
     const currentEndTime = new Date(lesson.end_time)
     const newEndTime = new Date(currentEndTime.getTime() + minutes * 60000)
@@ -209,24 +213,26 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
                 סיים
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3 mt-3">
-              <button
-                onClick={() => extendLesson(15)}
-                disabled={busy}
-                className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-body hover:bg-indigo-100 active:scale-[0.98] transition-all"
-              >
-                <span className="material-symbols-outlined text-sm">more_time</span>
-                הארך ב-15 דק'
-              </button>
-              <button
-                onClick={() => extendLesson(30)}
-                disabled={busy}
-                className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-body hover:bg-indigo-100 active:scale-[0.98] transition-all"
-              >
-                <span className="material-symbols-outlined text-sm">more_time</span>
-                הארך ב-30 דק'
-              </button>
-            </div>
+            {secRemaining > 0 && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <button
+                  onClick={() => extendLesson(15)}
+                  disabled={busy}
+                  className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-body hover:bg-indigo-100 active:scale-[0.98] transition-all"
+                >
+                  <span className="material-symbols-outlined text-sm">more_time</span>
+                  הארך ב-15 דק'
+                </button>
+                <button
+                  onClick={() => extendLesson(30)}
+                  disabled={busy}
+                  className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-body hover:bg-indigo-100 active:scale-[0.98] transition-all"
+                >
+                  <span className="material-symbols-outlined text-sm">more_time</span>
+                  הארך ב-30 דק'
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <button

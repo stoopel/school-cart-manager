@@ -140,10 +140,7 @@ export default async function handler(req, res) {
         }
         const teacherName = t?.name || teacherNote?.teacherName || 'מורה'
         const teacherId = t?.id || loan.teacher_id || teacherNote?.teacherId || null
-        const rawNid = (t?.national_id || teacherNote?.nationalId || '').trim().replace(/\D/g, '')
-        const normalizedNid = rawNid ? rawNid.padStart(9, '0') : ''
-        const loanAuthHash = (normalizedNid && loan.id) ? crypto.createHash('sha256').update(`${loan.id}:${normalizedNid}`).digest('hex') : null
-        const nationalId = t?.id_last4 ? `***${t.id_last4}` : (rawNid ? `***${rawNid.slice(-4)}` : '')
+                const nationalId = t?.id_last4 ? `***${t.id_last4}` : ''
 
         const formattedTeacherLoan = {
           device_id: dev.id,
@@ -154,12 +151,11 @@ export default async function handler(req, res) {
           student_id: null,
           teacher_id: teacherId,
           national_id: nationalId,
-          id_last4: t?.id_last4 || (rawNid ? rawNid.slice(-4) : ''),
-          loan_auth_hash: loanAuthHash,
+          id_last4: t?.id_last4 || '',
           student_name: teacherName,
           teacher_name: teacherName,
           is_teacher_loan: true,
-          class_name: 'מורה',
+          class_name: 'איש צוות',
           grade: 0,
           charge_strikes: 0,
           enable_charge_tracking: false,
@@ -185,20 +181,15 @@ export default async function handler(req, res) {
         })
       }
 
-      const sRawNid = (s.national_id || '').trim().replace(/\D/g, '')
-      const sNormNid = sRawNid ? sRawNid.padStart(9, '0') : ''
-      const sLoanAuthHash = (sNormNid && loan.id) ? crypto.createHash('sha256').update(`${loan.id}:${sNormNid}`).digest('hex') : null
-
-      const formattedLoan = {
+            const formattedLoan = {
         device_id: dev.id,
         device_number: dev.device_number,
         cart_id: dev.cart_id,
         cart_name: cartName || '',
         loan_id: loan.id,
         student_id: s.id,
-        national_id: s.id_last4 ? `***${s.id_last4}` : (sRawNid ? `***${sRawNid.slice(-4)}` : ''),
-        id_last4: s.id_last4 || (sRawNid ? sRawNid.slice(-4) : ''),
-        loan_auth_hash: sLoanAuthHash,
+        national_id: s.id_last4 ? `***${s.id_last4}` : '',
+        id_last4: s.id_last4 || '',
         student_name: s.name,
         class_name: s.class_name || '',
         grade: s.grade || 0,

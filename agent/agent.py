@@ -242,25 +242,8 @@ class CartAgent:
 
             # 3. בדיקה האם זו השאלת מורה חוקית (Teacher Loan מעגלת ההשאלה)
             if self.loan_data.get("is_teacher_loan"):
-                entered_clean = entered.lstrip('0')
-                entered_padded = entered.replace('-', '').strip().zfill(9)
                 loan_id = str(self.loan_data.get("loan_id", ""))
-                loan_auth_hash = self.loan_data.get("loan_auth_hash")
-
-                is_authenticated = False
-                if loan_auth_hash and loan_id:
-                    calc_hash = hashlib.sha256(f"{loan_id}:{entered_padded}".encode('utf-8')).hexdigest()
-                    if calc_hash == loan_auth_hash:
-                        is_authenticated = True
-
-                if not is_authenticated and loan_id:
-                    if db.verify_loan_auth(loan_id, entered):
-                        is_authenticated = True
-
-                if not is_authenticated:
-                    loan_nid = str(self.loan_data.get("national_id", ""))
-                    if loan_nid and not loan_nid.startswith('***') and (entered == loan_nid or entered_clean == loan_nid.lstrip('0')):
-                        is_authenticated = True
+                is_authenticated = db.verify_loan_auth(loan_id, entered) if loan_id else False
 
                 if not is_authenticated:
                     teacher_name = self.loan_data.get("teacher_name") or self.loan_data.get("student_name", "מורה")
@@ -303,25 +286,8 @@ class CartAgent:
                 return
 
             # 5. השאלת תלמיד - וידוא התאמה מול מזהה ההשאלה הקיים של התלמיד
-            entered_clean = entered.lstrip('0')
-            entered_padded = entered.replace('-', '').strip().zfill(9)
             loan_id = str(self.loan_data.get("loan_id", ""))
-            loan_auth_hash = self.loan_data.get("loan_auth_hash")
-
-            is_authenticated = False
-            if loan_auth_hash and loan_id:
-                calc_hash = hashlib.sha256(f"{loan_id}:{entered_padded}".encode('utf-8')).hexdigest()
-                if calc_hash == loan_auth_hash:
-                    is_authenticated = True
-
-            if not is_authenticated and loan_id:
-                if db.verify_loan_auth(loan_id, entered):
-                    is_authenticated = True
-
-            if not is_authenticated:
-                loan_nid = str(self.loan_data.get("national_id", ""))
-                if loan_nid and not loan_nid.startswith('***') and (entered == loan_nid or entered_clean == loan_nid.lstrip('0')):
-                    is_authenticated = True
+            is_authenticated = db.verify_loan_auth(loan_id, entered) if loan_id else False
 
             if not is_authenticated:
                 name = self.loan_data.get("student_name", "")

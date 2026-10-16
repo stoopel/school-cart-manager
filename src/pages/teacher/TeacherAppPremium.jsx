@@ -592,22 +592,30 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
   useEffect(() => {
     async function loadData() {
       setLoading(true)
-      const { data: stuClasses } = await supabase.from('students').select('class_name')
-      const classSet = new Set(
-        stuClasses?.map(s => s.class_name)
-          .filter(Boolean)
-          .filter(c => c !== 'מורה' && c !== 'מורים') ?? []
-      )
-      setClasses(Array.from(classSet).sort())
+      try {
+        const { data: grps } = await supabase.from('student_groups').select('id, name, teacher_id').order('name')
+        setGroups(grps ?? [])
 
-      const { data: grps } = await supabase.from('student_groups').select('id, name, teacher_id').order('name')
-      setGroups(grps ?? [])
+        // Fetch students safely via teacher endpoint (no plaintext national_id)
+        const res = await fetch('/api/teacher', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'list_students' })
+        })
+        const json = await res.json()
+        const stus = json.students || []
+        const filteredStus = stus.filter(s => s.class_name !== 'צוות' && s.class_name !== 'איש צוות' && s.class_name !== 'מורה')
+        setStudents(filteredStus)
 
-      // Exclude teachers from the list of students for selection
-      const { data: stus } = await supabase.from('students').select('id, name, national_id, class_name').order('name')
-      const filteredStus = stus?.filter(s => s.class_name !== 'מורה' && s.class_name !== 'מורים') ?? []
-      setStudents(filteredStus)
-      setLoading(false)
+        const classSet = new Set(
+          filteredStus.map(s => s.class_name).filter(Boolean)
+        )
+        setClasses(Array.from(classSet).sort())
+      } catch (err) {
+        console.error('Failed to load students in PreAssignModal:', err)
+      } finally {
+        setLoading(false)
+      }
     }
     loadData()
   }, [])
@@ -626,7 +634,7 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
       const combinedIds = Array.from(new Set([...existingIds, ...newIds]))
 
       const { error } = await supabase.rpc('secure_pre_assign_students', {
-        entered_teacher_id: teacher.national_id,
+        entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
         target_lesson_id: lesson.id,
         student_ids: combinedIds
       })
@@ -654,7 +662,7 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
       const combinedIds = Array.from(new Set([...existingIds, ...newIds]))
 
       const { error } = await supabase.rpc('secure_pre_assign_students', {
-        entered_teacher_id: teacher.national_id,
+        entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
         target_lesson_id: lesson.id,
         student_ids: combinedIds
       })
@@ -679,7 +687,7 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
       const combinedIds = Array.from(new Set([...existingIds, ...selectedStudents]))
 
       const { error } = await supabase.rpc('secure_pre_assign_students', {
-        entered_teacher_id: teacher.national_id,
+        entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
         target_lesson_id: lesson.id,
         student_ids: combinedIds
       })
@@ -712,7 +720,7 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
   const studentOptions = students.map(s => ({
     value: s.id,
     label: s.name,
-    subtitle: `ת.ז. ${s.national_id} ${s.class_name ? `| כיתה ${s.class_name}` : ''}`
+    subtitle: `${s.id_last4 ? `(..${s.id_last4}) ` : ''}${s.class_name ? `| כיתה ${s.class_name}` : ''}`
   }))
 
   return (
@@ -991,7 +999,7 @@ function TeacherLogin({ onLogin }) {
         .then(json => {
           setLoading(false)
           if (json.isValid && json.teacher) {
-            onLogin({ id: json.teacher.id, name: json.teacher.name, national_id: json.teacher.national_id })
+            onLogin({ id: json.teacher.id, name: json.teacher.name, id_last4: json.teacher.id_last4, id_hash: json.teacher.id_hash, national_id: json.teacher.national_id })
           } else {
             setError(json.error || 'אסימון הכניסה פג תוקף או שאינו תקין.')
           }
@@ -1009,7 +1017,7 @@ function TeacherLogin({ onLogin }) {
     const { data, error: rpcError } = await supabase.rpc('verify_teacher_id', { entered_id: id.trim() })
     setLoading(false)
     if (rpcError || !data || !data.is_valid) { setError('תעודת זהות לא נמצאה במערכת.'); return }
-    onLogin({ id: data.teacher_id, name: data.teacher_name, national_id: id.trim() })
+    onLogin({ id: data.teacher_id, name: data.teacher_name, id_last4: data.id_last4, id_hash: data.id_hash, national_id: '***' + (data.id_last4 || '') })
   }
 
   return (
@@ -1116,12 +1124,19 @@ function TeacherDashboard({ teacher, onLogout }) {
 
   useEffect(() => {
     async function loadStudents() {
-      const { data } = await supabase
-        .from('students')
-        .select('id, name, national_id, class_name')
-        .order('name')
-      const filtered = data?.filter(s => s.class_name !== 'מורה' && s.class_name !== 'מורים') ?? []
-      setStudents(filtered)
+      try {
+        const res = await fetch('/api/teacher', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'list_students' })
+        })
+        const json = await res.json()
+        const stus = json.students || []
+        const filtered = stus.filter(s => s.class_name !== 'צוות' && s.class_name !== 'איש צוות' && s.class_name !== 'מורה')
+        setStudents(filtered)
+      } catch (err) {
+        console.error('Failed to load students in GroupsTab:', err)
+      }
     }
     loadStudents()
   }, [])
@@ -1132,7 +1147,7 @@ function TeacherDashboard({ teacher, onLogout }) {
     if (!newGroupName.trim()) return
     setSavingGroup(true)
     const { data, error } = await supabase.rpc('secure_create_teacher_group', {
-      entered_teacher_id: teacher.national_id,
+      entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
       group_name: newGroupName.trim()
     })
     setSavingGroup(false)
@@ -1148,7 +1163,7 @@ function TeacherDashboard({ teacher, onLogout }) {
   async function handleDeleteGroup(groupId, groupName) {
     if (!confirm(`האם אתה בטוח שברצונך למחוק את הקבוצה "${groupName}"?`)) return
     const { data, error } = await supabase.rpc('secure_delete_teacher_group', {
-      entered_teacher_id: teacher.national_id,
+      entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
       target_group_id: groupId
     })
     if (error || (data && !data.success)) {
@@ -1161,7 +1176,7 @@ function TeacherDashboard({ teacher, onLogout }) {
   async function handleSaveMembers() {
     setSavingMembers(true)
     const { data, error } = await supabase.rpc('secure_set_group_members', {
-      entered_teacher_id: teacher.national_id,
+      entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
       target_group_id: groupMembersToEdit.id,
       student_ids: selectedStudentIds
     })
@@ -1177,7 +1192,7 @@ function TeacherDashboard({ teacher, onLogout }) {
   const studentOptions = students.map(s => ({
     value: s.id,
     label: s.name,
-    subtitle: `ת.ז. ${s.national_id} ${s.class_name ? `| כיתה ${s.class_name}` : ''}`
+    subtitle: `${s.id_last4 ? `(..${s.id_last4}) ` : ''}${s.class_name ? `| כיתה ${s.class_name}` : ''}`
   }))
 
   const active    = lessons.filter(l => l.status === 'active')
@@ -1436,7 +1451,7 @@ function TeacherDashboard({ teacher, onLogout }) {
                       <div key={sid} className="bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 flex items-center justify-between transition-all">
                         <div className="flex flex-col text-right truncate">
                           <span className="text-xs font-bold text-on-surface truncate">{s.name}</span>
-                          <span className="text-[10px] text-gray-400 font-body">ת.ז. {s.national_id} {s.class_name ? `| כיתה ${s.class_name}` : ''}</span>
+                          <span className="text-[10px] text-gray-400 font-body">{s.id_last4 ? `(..${s.id_last4}) ` : ''}{s.class_name ? `| כיתה ${s.class_name}` : ''}</span>
                         </div>
                         <button
                           onClick={() => setSelectedStudentIds(selectedStudentIds.filter(id => id !== sid))}

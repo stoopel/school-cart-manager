@@ -1,4 +1,4 @@
-import { supabaseAdmin, setCorsHeaders } from './_supabase.js'
+import { supabaseAdmin, setCorsHeaders, normalizeAndHashId } from './_supabase.js'
 
 export default async function handler(req, res) {
   setCorsHeaders(res)
@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body || {}
-    const targetRoute = body.endpoint || body.action
+    const targetRoute = body.endpoint || body.action || body.route || req.query?.route
 
     // Route 0: Register Device (Secure installer registration)
     if (targetRoute === 'register_device' || targetRoute === 'register-device') {
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
 
       const { data: devs, error: devErr } = await supabaseAdmin
         .from('devices')
-        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, teacher_id, checkout_at, digital_login_at, lesson_id, notes, students(id, national_id, name, class_name, grade, charge_strikes), teachers(id, national_id, name))')
+        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, teacher_id, checkout_at, digital_login_at, lesson_id, notes, students(id, id_hash, id_last4, national_id, name, class_name, grade, charge_strikes), teachers(id, id_hash, id_last4, national_id, name))')
         .eq('asset_tag', assetTag)
         .is('deleted_at', null)
         .eq('device_loans.status', 'active')
@@ -140,7 +140,10 @@ export default async function handler(req, res) {
         }
         const teacherName = t?.name || teacherNote?.teacherName || 'מורה'
         const teacherId = t?.id || loan.teacher_id || teacherNote?.teacherId || null
-        const nationalId = t?.national_id || teacherNote?.nationalId || ''
+        const rawNid = (t?.national_id || teacherNote?.nationalId || '').trim().replace(/\D/g, '')
+        const normalizedNid = rawNid ? rawNid.padStart(9, '0') : ''
+        const loanAuthHash = (normalizedNid && loan.id) ? crypto.createHash('sha256').update(`${loan.id}:${normalizedNid}`).digest('hex') : null
+        const nationalId = t?.id_last4 ? `***${t.id_last4}` : (rawNid ? `***${rawNid.slice(-4)}` : '')
 
         const formattedTeacherLoan = {
           device_id: dev.id,
@@ -151,6 +154,8 @@ export default async function handler(req, res) {
           student_id: null,
           teacher_id: teacherId,
           national_id: nationalId,
+          id_last4: t?.id_last4 || (rawNid ? rawNid.slice(-4) : ''),
+          loan_auth_hash: loanAuthHash,
           student_name: teacherName,
           teacher_name: teacherName,
           is_teacher_loan: true,
@@ -180,6 +185,10 @@ export default async function handler(req, res) {
         })
       }
 
+      const sRawNid = (s.national_id || '').trim().replace(/\D/g, '')
+      const sNormNid = sRawNid ? sRawNid.padStart(9, '0') : ''
+      const sLoanAuthHash = (sNormNid && loan.id) ? crypto.createHash('sha256').update(`${loan.id}:${sNormNid}`).digest('hex') : null
+
       const formattedLoan = {
         device_id: dev.id,
         device_number: dev.device_number,
@@ -187,7 +196,9 @@ export default async function handler(req, res) {
         cart_name: cartName || '',
         loan_id: loan.id,
         student_id: s.id,
-        national_id: s.national_id,
+        national_id: s.id_last4 ? `***${s.id_last4}` : (sRawNid ? `***${sRawNid.slice(-4)}` : ''),
+        id_last4: s.id_last4 || (sRawNid ? sRawNid.slice(-4) : ''),
+        loan_auth_hash: sLoanAuthHash,
         student_name: s.name,
         class_name: s.class_name || '',
         grade: s.grade || 0,
@@ -462,6 +473,28 @@ export default async function handler(req, res) {
         const { data: stu } = await supabaseAdmin.from('students').select('charge_strikes').eq('id', studentId).single()
         return res.status(200).json({ strikes: stu?.charge_strikes || 0 })
       }
+    }
+
+    // Route 8: Verify Loan Auth (Secure ID matching)
+    if (targetRoute === 'verify_loan_auth' || body.action === 'verify_loan_auth') {
+      const { loanId, enteredId } = body
+      if (!loanId || !enteredId) return res.status(400).json({ error: 'loanId and enteredId are required' })
+
+      const { data: loan, error } = await supabaseAdmin
+        .from('device_loans')
+        .select('id, student_id, teacher_id, students(id_hash), teachers(id_hash)')
+        .eq('id', loanId)
+        .eq('status', 'active')
+        .maybeSingle()
+
+      if (error || !loan) return res.status(404).json({ error: 'Active loan not found' })
+
+      const enteredHash = normalizeAndHashId(enteredId)
+      const s = Array.isArray(loan.students) ? loan.students[0] : loan.students;
+      const t = Array.isArray(loan.teachers) ? loan.teachers[0] : loan.teachers;
+      const expectedHash = s?.id_hash || t?.id_hash;
+      const isValid = Boolean(enteredHash && expectedHash && enteredHash === expectedHash)
+      return res.status(200).json({ isValid })
     }
 
     return res.status(400).json({ error: 'Unknown route' })

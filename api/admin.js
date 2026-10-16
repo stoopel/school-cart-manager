@@ -1,4 +1,4 @@
-import { supabaseAdmin, setCorsHeaders } from './_supabase.js'
+import { supabaseAdmin, setCorsHeaders, normalizeAndHashId, getIdLast4 } from './_supabase.js'
 
 export default async function handler(req, res) {
   setCorsHeaders(res)
@@ -181,7 +181,14 @@ export default async function handler(req, res) {
             }
           }
 
-          const result = await supabaseAdmin.from('students').insert({ ...student, is_active: true }).select().single()
+          const sNormId = (student.national_id || '').replace(/\D/g, '').padStart(9, '0')
+          const result = await supabaseAdmin.from('students').insert({
+            ...student,
+            national_id: sNormId,
+            id_hash: normalizeAndHashId(sNormId),
+            id_last4: sNormId.slice(-4),
+            is_active: true
+          }).select().single()
           if (result.error) return res.status(500).json({ error: result.error.message })
           return res.status(200).json({ student: result.data })
         }
@@ -297,7 +304,14 @@ export default async function handler(req, res) {
             .update({ is_active: false, deleted_at: new Date().toISOString() })
             .in('national_id', allVariantIds)
 
-          const result = await supabaseAdmin.from('teachers').insert({ ...teacher, is_active: true }).select().single()
+          const tNormId = (teacher.national_id || '').replace(/\D/g, '').padStart(9, '0')
+          const result = await supabaseAdmin.from('teachers').insert({
+            ...teacher,
+            national_id: tNormId,
+            id_hash: normalizeAndHashId(tNormId),
+            id_last4: tNormId.slice(-4),
+            is_active: true
+          }).select().single()
           if (result.error) return res.status(500).json({ error: result.error.message })
           return res.status(200).json({ teacher: result.data })
         }
@@ -330,7 +344,7 @@ export default async function handler(req, res) {
     // ─── LOANS SCOPE ───────────────────────────────────────────
     if (scope === 'loans' || action === 'list_loans' || action === 'force_return') {
       if (action === 'list' || action === 'list_loans') {
-        const { data: loans, error } = await supabaseAdmin.from('device_loans').select('*, students(name, national_id, class_name, grade), teachers(name, national_id), devices(device_number, asset_tag, cart_id, carts(name, display_name))').order('checkout_at', { ascending: false }).limit(100)
+        const { data: loans, error } = await supabaseAdmin.from('device_loans').select('*, students(name, id_last4, class_name, grade), teachers(name, id_last4), devices(device_number, asset_tag, cart_id, carts(name, display_name))').order('checkout_at', { ascending: false }).limit(100)
         if (error) return res.status(500).json({ error: error.message })
         return res.status(200).json({ loans: loans || [] })
       }
@@ -380,7 +394,16 @@ export default async function handler(req, res) {
               if (isTeacher) {
                 skippedTeachersCount++
               } else {
-                acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId, is_active: true, deleted_at: null }
+                const idNorm = cleanId.replace(/\D/g, '').padStart(9, '0')
+                  acc[cleanId] = {
+                    ...acc[cleanId],
+                    ...r,
+                    national_id: idNorm,
+                    id_hash: normalizeAndHashId(idNorm),
+                    id_last4: idNorm.slice(-4),
+                    is_active: true,
+                    deleted_at: null
+                  }
               }
             }
             return acc
@@ -401,7 +424,15 @@ export default async function handler(req, res) {
           records.reduce((acc, r) => {
             if (r.national_id) {
               const cleanId = String(r.national_id).trim()
-              acc[cleanId] = { ...acc[cleanId], ...r, national_id: cleanId, is_active: true }
+              const idNorm = cleanId.replace(/\D/g, '').padStart(9, '0')
+                acc[cleanId] = {
+                  ...acc[cleanId],
+                  ...r,
+                  national_id: idNorm,
+                  id_hash: normalizeAndHashId(idNorm),
+                  id_last4: idNorm.slice(-4),
+                  is_active: true
+                }
             }
             return acc
           }, {})

@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { supabaseAdmin, setCorsHeaders } from './_supabase.js'
+import { supabaseAdmin, setCorsHeaders, normalizeAndHashId } from './_supabase.js'
 
 export default async function handler(req, res) {
   setCorsHeaders(res)
@@ -13,7 +13,8 @@ export default async function handler(req, res) {
     // Route 1: Teacher Verify (Standard ID Login)
     if (action === 'verify' || (!action && nationalId)) {
       if (!nationalId) return res.status(400).json({ error: 'nationalId is required' })
-      const { data: resRpc, error } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: nationalId })
+      const idHash = normalizeAndHashId(nationalId) || nationalId
+      const { data: resRpc, error } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: idHash })
       if (error) return res.status(500).json({ error: error.message })
       if (resRpc && resRpc.is_valid) {
         return res.status(200).json({
@@ -21,11 +22,28 @@ export default async function handler(req, res) {
           teacher: {
             id: resRpc.teacher_id,
             name: resRpc.teacher_name,
-            national_id: resRpc.national_id
+            id_last4: resRpc.id_last4,
+            id_hash: resRpc.id_hash
           }
         })
       }
-      return res.status(200).json({ isValid: false, error: 'תעודת זהות אינה שייכת למורה מורשה' })
+      return res.status(200).json({ isValid: false, error: 'תעודת זהות אינה מזוהה כאיש צוות פעיל' })
+    }
+
+    // Route 1.5: List Students for Teacher (Active, safe, no plaintext national_id)
+    if (action === 'list_students') {
+      const { data: stus, error: stuErr } = await supabaseAdmin.rpc('get_teacher_student_list')
+      if (stuErr) {
+        const { data: fallbackStus, error: fbErr } = await supabaseAdmin
+          .from('students')
+          .select('id, name, class_name, id_last4')
+          .eq('is_active', true)
+          .is('deleted_at', null)
+          .order('name')
+        if (fbErr) return res.status(500).json({ error: fbErr.message })
+        return res.status(200).json({ students: fallbackStus || [] })
+      }
+      return res.status(200).json({ students: stus || [] })
     }
 
     // Route 2: List Lessons
@@ -139,12 +157,12 @@ export default async function handler(req, res) {
         if (Date.now() > payload.exp) {
           return res.status(401).json({ error: 'Token expired' })
         }
-        const { data: teacher, error } = await supabaseAdmin.from('teachers').select('id, name, national_id, is_active').eq('id', payload.teacherId).maybeSingle()
+        const { data: teacher, error } = await supabaseAdmin.from('teachers').select('id, name, id_last4, id_hash, is_active').eq('id', payload.teacherId).maybeSingle()
         if (error) return res.status(500).json({ error: error.message })
         if (!teacher || teacher.is_active === false) {
           return res.status(404).json({ error: 'Teacher not found or inactive' })
         }
-        return res.status(200).json({ isValid: true, teacher: { id: teacher.id, name: teacher.name, national_id: teacher.national_id } })
+        return res.status(200).json({ isValid: true, teacher: { id: teacher.id, name: teacher.name, id_last4: teacher.id_last4, id_hash: teacher.id_hash } })
       } catch (err) {
         return res.status(400).json({ error: 'Malformed token payload' })
       }

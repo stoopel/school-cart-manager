@@ -31,8 +31,8 @@ export default function Loans() {
 
     let q = supabase.from('device_loans').select(`
       id, checkout_at, checkin_at, status, checkout_method, digital_login_at,
-      students(name, national_id, class_name),
-      teachers(name, national_id),
+      students(name, id_last4, class_name),
+      teachers(name, id_last4),
       ${deviceRel}
     `).order('checkout_at', { ascending: false }).limit(500)
 
@@ -63,7 +63,7 @@ export default function Loans() {
   function exportExcel() {
     const rows = loans.map(l => ({
       'שם שואל':     l.teachers?.name ? `${l.teachers.name} (מורה)` : (l.students?.name ?? ''),
-      'תעודת זהות':  l.teachers?.national_id || l.students?.national_id || '',
+      'ת.ז. (4 ספרות)': (l.teachers?.id_last4 || l.students?.id_last4) ? `***${l.teachers?.id_last4 || l.students?.id_last4}` : '',
       'כיתה / תפקיד': l.teachers ? 'מורה' : (l.students?.class_name ?? ''),
       'עגלה':        l.devices?.carts?.display_name || l.devices?.carts?.name || '',
       'מחשב':        l.devices?.device_number ?? '',

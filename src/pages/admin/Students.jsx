@@ -471,7 +471,7 @@ export default function Students() {
                             <span className="badge badge-warning" style={{ marginRight: 8, fontSize: '0.72rem' }}>מושבת</span>
                           )}
                         </td>
-                        <td style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}>{s.national_id}</td>
+                        <td style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}>{s.id_last4 ? `***${s.id_last4}` : s.national_id}</td>
                         <td><span className="badge badge-info">{s.class_name || '—'}</span></td>
                         <td className="text-muted">{s.grade || '—'}</td>
                         <td>

@@ -1,4 +1,4 @@
-import { supabaseAdmin, setCorsHeaders } from './_supabase.js'
+import { supabaseAdmin, setCorsHeaders, normalizeAndHashId, getIdLast4 } from './_supabase.js'
 
 export default async function handler(req, res) {
   setCorsHeaders(res)
@@ -62,15 +62,14 @@ export default async function handler(req, res) {
         if (!nationalId || nationalId.length < 5) {
           return res.status(400).json({ error: 'תעודת זהות חייבת להכיל לפחות 5 ספרות' })
         }
+        // 1. Search in students table by cryptographic hash
         const cleanId = String(nationalId).trim()
-        const unpadded = cleanId.replace(/^0+/, '')
-        const padded9 = cleanId.padStart(9, '0')
+        const idHash = normalizeAndHashId(cleanId)
 
-        // 1. Search in students table
         const { data: stus, error: stuErr } = await supabaseAdmin
           .from('students')
-          .select('*')
-          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .select('id, name, class_name, grade, is_active, charge_strikes, id_last4')
+          .eq('id_hash', idHash)
           .is('deleted_at', null)
           .limit(1)
 
@@ -78,19 +77,19 @@ export default async function handler(req, res) {
         let isTeacher = false
 
         if (stu && stu.is_active === false) {
-          return res.status(400).json({ error: 'תלמיד זה מוגדר כלא-פעיל במערכת. פנה למנהל.' })
+          return res.status(400).json({ error: 'תלמיד זה אינו פעיל במערכת. פנה למנהל.' })
         }
 
         // 2. If not found in students, verify via secure teacher RPC
         if (!stu) {
-          const { data: resRpc } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: cleanId })
+          const { data: resRpc } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: idHash || cleanId })
           if (resRpc && resRpc.is_valid) {
             isTeacher = true
             stu = {
               id: resRpc.teacher_id,
-              national_id: resRpc.national_id,
               name: resRpc.teacher_name,
-              class_name: 'מורה',
+              id_last4: resRpc.id_last4,
+              class_name: 'איש צוות',
               grade: 0,
               is_teacher: true
             }

@@ -466,3 +466,13 @@ class RealtimeSubscription:
                 ws.send(json.dumps({"topic": "phoenix", "event": "heartbeat",
                                     "payload": {}, "ref": self._next_ref()}))
             except: break
+
+
+def verify_loan_auth(loan_id: str, entered_id: str) -> bool:
+    """Verifies student/teacher ID for loan via secure serverless endpoint"""
+    try:
+        res = _api_post("verify_loan_auth", {"loanId": loan_id, "enteredId": entered_id})
+        return bool(res and res.get("isValid"))
+    except Exception as e:
+        log.error(f"verify_loan_auth error: {e}")
+        return False

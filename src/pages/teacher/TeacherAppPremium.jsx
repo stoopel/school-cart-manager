@@ -628,8 +628,9 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
       const { data: existing } = await supabase.from('lesson_pre_assignments').select('student_id').eq('lesson_id', lesson.id)
       const existingIds = existing?.map(ex => ex.student_id) ?? []
 
-      const { data: classStus } = await supabase.from('students').select('id').in('class_name', selectedClasses)
-      const newIds = classStus?.map(s => s.id) ?? []
+      const newIds = students
+        .filter(s => selectedClasses.includes(s.class_name))
+        .map(s => s.id)
 
       const combinedIds = Array.from(new Set([...existingIds, ...newIds]))
 

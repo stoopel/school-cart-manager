@@ -339,7 +339,10 @@ export default async function handler(req, res) {
       }
 
       if (action === 'check_pre_assigned') {
-        const { data: resRpc } = await supabaseAdmin.rpc('get_pre_assigned_active_lesson', { entered_id: nationalId })
+        const targetStudentId = studentId || body.student_id || body.p_student_id
+        if (!targetStudentId) return res.status(400).json({ error: 'studentId is required' })
+        const { data: resRpc, error: rpcErr } = await supabaseAdmin.rpc('get_pre_assigned_active_lesson', { p_student_id: targetStudentId })
+        if (rpcErr) return res.status(500).json({ error: rpcErr.message })
         return res.status(200).json({ lesson: resRpc })
       }
     }

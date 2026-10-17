@@ -325,7 +325,8 @@ class CartAgent:
                     ])
                     return
 
-            pre_assigned = db.check_pre_assigned_lessons(entered)
+            student_id = self.loan_data.get("student_id") if self.loan_data else None
+            pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else None
             if pre_assigned:
                 if len(pre_assigned) == 1:
                     # שיעור יחיד - כניסה אוטומטית ישירה
@@ -655,8 +656,8 @@ class CartAgent:
             if self.loan_data:
                 self.screen.relock("השיעור הסתיים. בחר או הכנס שיעור חדש.")
                 try:
-                    national_id = self.loan_data.get("national_id", "")
-                    pre_assigned = db.check_pre_assigned_lessons(national_id) if national_id else None
+                    student_id = self.loan_data.get("student_id")
+                    pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else None
                     if pre_assigned:
                         self.screen.root.after(0, lambda: self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected))
                         return

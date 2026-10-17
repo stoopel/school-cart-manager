@@ -254,12 +254,18 @@ def disconnect_student_from_lesson(loan_id, student_id, lesson_id=None) -> bool:
     })
     return bool(res and res.get("success"))
 
-def check_pre_assigned_lessons(national_id: str) -> list:
-    """בודק האם התלמיד משויך לשיעור פעיל דרך ה-API"""
-    res = _api_post("lesson", {"action": "check_pre_assigned", "nationalId": national_id})
+def check_pre_assigned_lessons(student_id: str) -> list:
+    """בדיקה האם לתלמיד שויך שיעור פעיל מראש דרך ה-API לפי student_id (UUID)"""
+    if not student_id:
+        return []
+    res = _api_post("lesson", {"action": "check_pre_assigned", "studentId": student_id})
     if res and res.get("lesson"):
         l = res["lesson"]
-        return l if isinstance(l, list) else [l]
+        items = l if isinstance(l, list) else [l]
+        for item in items:
+            if isinstance(item, dict) and "id" in item and "lesson_id" not in item:
+                item["lesson_id"] = item["id"]
+        return items
     return []
 
 def get_teacher_active_lessons(teacher_id: str) -> list:

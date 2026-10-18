@@ -247,6 +247,13 @@ export default function StationHome() {
     loadStats()
   }
 
+  /**
+   * יציאה ממצב עמדה (Kiosk Logout).
+   * מנקה את הרשאת ה-Kiosk (kiosk_auths) ומחזירה למסך בחירת עגלה.
+   * הערה: כפתור ה-UI הוסר בעבר מה-Header (קומיט b7cced7) כדי למנוע ניתוק בטעות על ידי תלמידים.
+   * הפונקציה נשמרת לצורך אפשרות הפעלה מנוהלת / מוסתרת (כגון Long Press על הלוגו למנהל מערכת).
+   */
+  // eslint-disable-next-line no-unused-vars
   function handleLogoutStation() {
     if (!confirm('האם לנתק תחנה זו? יהיה צורך להזין את קוד הקיוסק מחדש.')) return
     if (cart) {

@@ -47,7 +47,6 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
   const [busy, setBusy] = useState(false)
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [preAssigned, setPreAssigned] = useState([])
-  const [loadingAssign, setLoadingAssign] = useState(false)
 
   const isScheduled = lesson.status === 'scheduled'
   const startTs = new Date(lesson.start_time).getTime()
@@ -63,8 +62,7 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
     }
   }, [isScheduled, secUntilStart, onRefresh, lesson.id])
 
-  const loadAssignments = useCallback(async (isSilent = false) => {
-    if (!isSilent) setLoadingAssign(true)
+  const loadAssignments = useCallback(async () => {
     const { data: lpa } = await supabase
       .from('lesson_pre_assignments')
       .select('student_id, students(name, class_name)')
@@ -83,7 +81,6 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
       class_name: item.students?.class_name ?? '',
       isPresent: participantSet.has(item.student_id)
     })))
-    if (!isSilent) setLoadingAssign(false)
   }, [lesson.id])
 
   useEffect(() => {

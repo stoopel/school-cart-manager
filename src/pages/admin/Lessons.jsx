@@ -39,7 +39,7 @@ function Countdown({ endTime, isLocked }) {
 }
 
 // ── Lesson Card ────────────────────────────────────────────────
-function LessonCard({ lesson, onEnd, onToggleLock, onRefresh }) {
+function LessonCard({ lesson, onEnd, onRefresh }) {
   const [ending, setEnding]   = useState(false)
   const [locking, setLocking] = useState(false)
 
@@ -264,7 +264,6 @@ export default function Lessons() {
               key={lesson.id}
               lesson={lesson}
               onEnd={load}
-              onToggleLock={() => {}}
               onRefresh={load}
             />
           ))}

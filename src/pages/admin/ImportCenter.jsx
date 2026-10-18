@@ -265,9 +265,13 @@ export default function ImportCenter() {
     setProgress({ current: 0, total: parsedData.rows.length, type: 'teachers' })
     
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
         body: JSON.stringify({
           scope: 'import',
           type: 'teachers',
@@ -284,6 +288,31 @@ export default function ImportCenter() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // ─── 2. Save Groups (Conflict Handlers) ───────────────────────
+  const handleResolveActionChange = (groupNumber, action) => {
+    if (action === 'update') {
+      const conflictItem = conflicts.find(c => c.newRow.group_number === groupNumber)
+      setPendingConfirmGroup(conflictItem)
+      setShowSecondConfirm(true)
+    } else {
+      setResolvedActions(prev => ({ ...prev, [groupNumber]: 'skip' }))
+    }
+  }
+
+  const confirmPendingUpdate = () => {
+    if (pendingConfirmGroup) {
+      const gNum = pendingConfirmGroup.newRow.group_number
+      setResolvedActions(prev => ({ ...prev, [gNum]: 'update' }))
+    }
+    setShowSecondConfirm(false)
+    setPendingConfirmGroup(null)
+  }
+
+  const cancelPendingUpdate = () => {
+    setShowSecondConfirm(false)
+    setPendingConfirmGroup(null)
   }
 
   const saveGroups = async () => {
@@ -314,9 +343,13 @@ export default function ImportCenter() {
               resolvedTeacherId = tJson.teacher.id
             } else {
               const newTeacherName = row.teacher_name ? row.teacher_name.trim() : 'מורה חדש'
+              const { data: { session } } = await supabase.auth.getSession()
               const createRes = await fetch('/api/admin', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+                },
                 body: JSON.stringify({
                   scope: 'teachers',
                   action: 'save_teacher',
@@ -407,10 +440,14 @@ export default function ImportCenter() {
     setProgress({ current: 0, total: parsedData.rows.length, type: 'students' })
 
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       // 1. Bulk import students via secure admin API (hashes in memory, zero plaintext storage)
       const res = await fetch('/api/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+        },
         body: JSON.stringify({
           scope: 'import',
           type: 'students',

@@ -10,6 +10,7 @@ export default function Students() {
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
   const [showAdd, setShowAdd]   = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
   const [form, setForm]         = useState({ national_id: '', name: '', class_name: '', grade: '' })
@@ -80,7 +81,7 @@ export default function Students() {
     (g.description || '').includes(searchGroup)
   )
 
-  async function handleAdd(e) {
+  async function addStudent(e) {
     e.preventDefault()
     if (!form.national_id || !form.name) return
     setError('')
@@ -266,9 +267,13 @@ export default function Students() {
 
       let inserted = 0, skipped = 0, teachersSkipped = 0
       try {
+        const { data: { session } } = await supabase.auth.getSession()
         const res = await fetch('/api/admin', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+          },
           body: JSON.stringify({
             scope: 'import',
             type: 'students',

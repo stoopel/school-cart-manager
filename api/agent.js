@@ -256,8 +256,6 @@ export default async function handler(req, res) {
 
       if (action === 'verify_teacher' || action === 'verify-id') {
         const cleanId = String(nationalId).trim()
-        const unpadded = cleanId.replace(/^0+/, '')
-        const padded9 = cleanId.padStart(9, '0')
 
         // 1. Try RPC verify_teacher_id
         const { data: resRpc, error } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: cleanId })
@@ -284,8 +282,6 @@ export default async function handler(req, res) {
 
       if (action === 'verify_student') {
         const cleanId = String(nationalId).trim()
-        const unpadded = cleanId.replace(/^0+/, '')
-        const padded9 = cleanId.padStart(9, '0')
 
         const idHash = normalizeAndHashId(cleanId)
         const { data: stus, error } = await supabaseAdmin
@@ -304,7 +300,7 @@ export default async function handler(req, res) {
     // Route 4: Lesson operations
     if (targetRoute === 'lesson' || targetRoute === 'get_by_code' || targetRoute === 'get_by_id' || targetRoute === 'join' || targetRoute === 'disconnect' || targetRoute === 'check_pre_assigned' || body.action === 'get_by_code' || body.action === 'get_by_id' || body.action === 'join' || body.action === 'disconnect' || body.action === 'check_pre_assigned') {
       const action = (targetRoute !== 'lesson' ? targetRoute : body.action) || body.action
-      const { lessonCode, lessonId, studentId, loanId, deviceId, nationalId } = body
+      const { lessonCode, lessonId, studentId, loanId, deviceId } = body
 
       if (action === 'get_by_code') {
         const { data: rows } = await supabaseAdmin.from('active_lessons').select('*').eq('lesson_code', lessonCode)

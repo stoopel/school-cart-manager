@@ -1,4 +1,4 @@
-import { supabaseAdmin, setCorsHeaders, normalizeAndHashId, getIdLast4 } from './_supabase.js'
+import { supabaseAdmin, setCorsHeaders, normalizeAndHashId } from './_supabase.js'
 
 export default async function handler(req, res) {
   setCorsHeaders(res)
@@ -6,7 +6,6 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   try {
-    const { route } = req.query || {}
     const body = req.body || {}
     const targetRoute = body.route || body.endpoint || body.action || req.query?.route
 
@@ -72,6 +71,8 @@ export default async function handler(req, res) {
           .eq('id_hash', idHash)
           .is('deleted_at', null)
           .limit(1)
+
+        if (stuErr) return res.status(500).json({ error: 'שגיאת תקשורת במסד הנתונים. נסה שוב.' })
 
         let stu = stus && stus.length > 0 ? stus[0] : null
         let isTeacher = false

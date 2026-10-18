@@ -82,7 +82,7 @@ export default async function handler(req, res) {
 
       const { data: devs, error: devErr } = await supabaseAdmin
         .from('devices')
-        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, teacher_id, checkout_at, digital_login_at, lesson_id, notes, students(id, id_hash, id_last4, national_id, name, class_name, grade, charge_strikes), teachers(id, id_hash, id_last4, national_id, name))')
+        .select('id, device_number, cart_id, carts(name, enable_charge_tracking), device_loans(id, student_id, teacher_id, checkout_at, digital_login_at, lesson_id, notes, students(id, id_hash, id_last4, name, class_name, grade, charge_strikes), teachers(id, id_hash, id_last4, name))')
         .eq('asset_tag', assetTag)
         .is('deleted_at', null)
         .eq('device_loans.status', 'active')
@@ -265,17 +265,18 @@ export default async function handler(req, res) {
           return res.status(200).json({ isTeacher: true, teacher: { id: resRpc.teacher_id, name: resRpc.teacher_name, national_id: resRpc.national_id || cleanId } })
         }
 
-        // 2. Direct fallback query with unpadded and padded versions
+        // 2. Direct fallback query by id_hash
+        const idHash = normalizeAndHashId(cleanId)
         const { data: tList } = await supabaseAdmin
           .from('teachers')
-          .select('id, name, national_id, is_active')
-          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .select('id, name, id_last4, is_active')
+          .eq('id_hash', idHash)
           .eq('is_active', true)
           .limit(1)
 
         if (tList && tList.length > 0) {
           const t = tList[0]
-          return res.status(200).json({ isTeacher: true, teacher: { id: t.id, name: t.name, national_id: t.national_id } })
+          return res.status(200).json({ isTeacher: true, teacher: { id: t.id, name: t.name, id_last4: t.id_last4, national_id: '***' + (t.id_last4 || '') } })
         }
 
         return res.status(200).json({ isTeacher: false, teacher: null })
@@ -286,16 +287,17 @@ export default async function handler(req, res) {
         const unpadded = cleanId.replace(/^0+/, '')
         const padded9 = cleanId.padStart(9, '0')
 
+        const idHash = normalizeAndHashId(cleanId)
         const { data: stus, error } = await supabaseAdmin
           .from('students')
-          .select('id, national_id, name, class_name, charge_strikes')
-          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+          .select('id, name, class_name, charge_strikes, id_last4')
+          .eq('id_hash', idHash)
           .eq('is_active', true)
           .is('deleted_at', null)
           .limit(1)
 
         if (error || !stus || stus.length === 0) return res.status(404).json({ error: 'Student not found' })
-        return res.status(200).json({ student: stus[0] })
+        return res.status(200).json({ student: { ...stus[0], national_id: '***' + (stus[0].id_last4 || '') } })
       }
     }
 

@@ -70,7 +70,7 @@ export default function Students() {
     if (!showArchived && s.is_active === false) return false
     return (
       s.name.includes(search) ||
-      s.national_id.includes(search) ||
+      (s.id_last4 && s.id_last4.includes(search)) ||
       (s.class_name && s.class_name.includes(search))
     )
   })
@@ -264,87 +264,27 @@ export default function Students() {
         group_name:  String(r['קבוצה'] || r['group'] || r['שם קבוצה'] || '').trim()
       })).filter(r => r.national_id && r.name)
 
-      // Pre-fetch teacher IDs to prevent teachers from polluting students table
-      const { data: allTeachers } = await supabase.from('teachers').select('national_id')
-      const teacherNids = new Set()
-      if (allTeachers) {
-        for (const t of allTeachers) {
-          if (t.national_id) {
-            const raw = String(t.national_id).trim()
-            teacherNids.add(raw)
-            teacherNids.add(raw.replace(/^0+/, ''))
-            teacherNids.add(raw.padStart(9, '0'))
-          }
-        }
-      }
-
       let inserted = 0, skipped = 0, teachersSkipped = 0
-      for (const row of toInsert) {
-        const cleanId = String(row.national_id || '').trim()
-        const unpadded = cleanId.replace(/^0+/, '')
-        const padded9 = cleanId.padStart(9, '0')
-
-        // Teacher Shield: Check if this row is a teacher by class, grade or existing teacher ID
-        const isTeacherRow = (
-          row.class_name === 'מורה' ||
-          (typeof row.class_name === 'string' && (row.class_name.includes('מורה') || row.class_name.includes('צוות'))) ||
-          row.grade === 99 ||
-          teacherNids.has(cleanId) ||
-          teacherNids.has(unpadded) ||
-          teacherNids.has(padded9)
-        )
-
-        if (isTeacherRow) {
-          teachersSkipped++
-          continue
+      try {
+        const res = await fetch('/api/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scope: 'import',
+            type: 'students',
+            records: toInsert
+          })
+        })
+        const importRes = await res.json()
+        if (res.ok) {
+          inserted = importRes.count || 0
+          teachersSkipped = importRes.skipped_teachers || 0
+        } else {
+          throw new Error(importRes.error || 'שגיאה בייבוא')
         }
-
-        // 1. Upsert Student
-        const { data: stuData, error: stuErr } = await supabase
-          .from('students')
-          .upsert({
-            national_id: cleanId,
-            name: row.name,
-            class_name: row.class_name,
-            grade: row.grade,
-            is_active: true,
-            deleted_at: null
-          }, { onConflict: 'national_id' })
-          .select('id')
-          .single()
-
-        if (stuErr || !stuData) {
-          skipped++
-          continue
-        }
-
-        inserted++
-
-        // 2. Associate with Group if provided
-        if (row.group_name) {
-          // Check/Create group
-          let { data: grp } = await supabase
-            .from('student_groups')
-            .select('id')
-            .eq('name', row.group_name)
-            .maybeSingle()
-
-          if (!grp) {
-            const { data: newGrp } = await supabase
-              .from('student_groups')
-              .insert({ name: row.group_name })
-              .select('id')
-              .single()
-            grp = newGrp
-          }
-
-          if (grp) {
-            // Upsert group membership
-            await supabase
-              .from('student_group_members')
-              .upsert({ group_id: grp.id, student_id: stuData.id }, { onConflict: 'group_id,student_id' })
-          }
-        }
+      } catch (err) {
+        console.error('Import error:', err)
+        throw err
       }
       setImportResult({ inserted, skipped, teachersSkipped, total: toInsert.length })
       load()
@@ -471,7 +411,7 @@ export default function Students() {
                             <span className="badge badge-warning" style={{ marginRight: 8, fontSize: '0.72rem' }}>מושבת</span>
                           )}
                         </td>
-                        <td style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}>{s.id_last4 ? `***${s.id_last4}` : s.national_id}</td>
+                        <td style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}>{s.id_last4 ? `***${s.id_last4}` : '—'}</td>
                         <td><span className="badge badge-info">{s.class_name || '—'}</span></td>
                         <td className="text-muted">{s.grade || '—'}</td>
                         <td>
@@ -643,7 +583,7 @@ export default function Students() {
                   <option value="">-- בחר תלמיד להוספה --</option>
                   {eligibleStudents.map(s => (
                     <option key={s.id} value={s.id}>
-                      {s.name} (ת.ז. {s.national_id} {s.class_name ? `| כיתה ${s.class_name}` : ''})
+                      {s.name} (***{s.id_last4 || ''} {s.class_name ? `| כיתה ${s.class_name}` : ''})
                     </option>
                   ))}
                 </select>

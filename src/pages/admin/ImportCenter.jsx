@@ -265,73 +265,25 @@ export default function ImportCenter() {
     setProgress({ current: 0, total: parsedData.rows.length, type: 'teachers' })
     
     try {
-      let inserted = 0, updated = 0
-      for (let i = 0; i < parsedData.rows.length; i++) {
-        const row = parsedData.rows[i]
-        const cleanId = String(row.national_id || '').trim()
-        const unpadded = cleanId.replace(/^0+/, '')
-        const padded9 = cleanId.padStart(9, '0')
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'import',
+          type: 'teachers',
+          records: parsedData.rows
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה בייבוא מורים')
 
-        const { data: existingList } = await supabase
-          .from('teachers')
-          .select('id')
-          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
-          .limit(1)
-
-        const existing = existingList && existingList.length > 0 ? existingList[0] : null
-
-        if (existing) {
-          const { error: patchErr } = await supabase
-            .from('teachers')
-            .update({ name: row.name })
-            .eq('id', existing.id)
-          if (!patchErr) updated++
-        } else {
-          const { error: postErr } = await supabase
-            .from('teachers')
-            .insert({ name: row.name, national_id: cleanId })
-          if (!postErr) inserted++
-        }
-
-        // Deactivate any matching ID from students table to maintain clean separation
-        await supabase
-          .from('students')
-          .update({ is_active: false, deleted_at: new Date().toISOString() })
-          .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
-        setProgress({ current: i + 1, total: parsedData.rows.length, type: 'teachers' })
-      }
-      setSuccess(`✅ קליטת המורים הושלמה! יובאו ${inserted} מורים חדשים, ועדכנו ${updated} מורים קיימים.`)
+      setSuccess(`✅ נקלטו בהצלחה ${data.count || parsedData.rows.length} מורים למערכת!`)
       setParsedData(null)
     } catch (err) {
-      setError('שגיאה במהלך השמירה: ' + err.message)
+      setError('שגיאה בייבוא מורים: ' + err.message)
     } finally {
       setLoading(false)
     }
-  }
-
-  // ─── 2. Save Groups ────────────────────────────────────────────
-  const handleResolveActionChange = (groupNumber, action) => {
-    if (action === 'update') {
-      const conflictItem = conflicts.find(c => c.newRow.group_number === groupNumber)
-      setPendingConfirmGroup(conflictItem)
-      setShowSecondConfirm(true)
-    } else {
-      setResolvedActions(prev => ({ ...prev, [groupNumber]: 'skip' }))
-    }
-  }
-
-  const confirmPendingUpdate = () => {
-    if (pendingConfirmGroup) {
-      const gNum = pendingConfirmGroup.newRow.group_number
-      setResolvedActions(prev => ({ ...prev, [gNum]: 'update' }))
-    }
-    setShowSecondConfirm(false)
-    setPendingConfirmGroup(null)
-  }
-
-  const cancelPendingUpdate = () => {
-    setShowSecondConfirm(false)
-    setPendingConfirmGroup(null)
   }
 
   const saveGroups = async () => {
@@ -347,41 +299,37 @@ export default function ImportCenter() {
         const row = parsedData.rows[i]
         const action = resolvedActions[row.group_number]
 
-        // Resolve teacher_id if national_id is provided
+        // Resolve teacher_id via secure API
         let resolvedTeacherId = null
         if (row.teacher_national_id) {
           const cleanTId = String(row.teacher_national_id || '').trim()
-          const unpadded = cleanTId.replace(/^0+/, '')
-          const padded9 = cleanTId.padStart(9, '0')
-
-          const { data: tList } = await supabase
-            .from('teachers')
-            .select('id')
-            .or(`national_id.eq.${cleanTId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
-            .limit(1)
-
-          const t = tList && tList.length > 0 ? tList[0] : null
-          
-          if (t) {
-            resolvedTeacherId = t.id
-          } else {
-            // Auto-create teacher in teachers table if they don't exist yet
-            const newTeacherName = row.teacher_name ? row.teacher_name.trim() : 'מורה חדש'
-            const { data: newT, error: createTErr } = await supabase
-              .from('teachers')
-              .insert({
-                name: newTeacherName,
-                national_id: cleanTId
-              })
-              .select('id')
-              .single()
-            
-            if (!createTErr && newT) {
-              resolvedTeacherId = newT.id
+          try {
+            const tRes = await fetch('/api/teacher', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'verify', nationalId: cleanTId })
+            })
+            const tJson = await tRes.json()
+            if (tJson.isValid && tJson.teacher) {
+              resolvedTeacherId = tJson.teacher.id
             } else {
-              console.error('Failed to auto-create teacher:', createTErr)
-              throw new Error(`נכשל בהקמת מורה חדש "${newTeacherName}" (ת.ז ${cleanTId}): ${createTErr?.message || 'שגיאה לא ידועה'}`)
+              const newTeacherName = row.teacher_name ? row.teacher_name.trim() : 'מורה חדש'
+              const createRes = await fetch('/api/admin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  scope: 'teachers',
+                  action: 'save_teacher',
+                  teacher: { name: newTeacherName, national_id: cleanTId }
+                })
+              })
+              const createData = await createRes.json()
+              if (createRes.ok && createData.teacher) {
+                resolvedTeacherId = createData.teacher.id
+              }
             }
+          } catch (e) {
+            console.error('Error resolving teacher:', e)
           }
         }
 
@@ -459,144 +407,79 @@ export default function ImportCenter() {
     setProgress({ current: 0, total: parsedData.rows.length, type: 'students' })
 
     try {
-      // Pre-fetch all teacher IDs to prevent any teacher from being saved as student
-      const { data: allTeachers } = await supabase.from('teachers').select('national_id')
-      const teacherNids = new Set()
-      if (allTeachers) {
-        for (const t of allTeachers) {
-          if (t.national_id) {
-            const raw = String(t.national_id).trim()
-            teacherNids.add(raw)
-            teacherNids.add(raw.replace(/^0+/, ''))
-            teacherNids.add(raw.padStart(9, '0'))
-          }
-        }
-      }
+      // 1. Bulk import students via secure admin API (hashes in memory, zero plaintext storage)
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'import',
+          type: 'students',
+          records: parsedData.rows
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה בייבוא תלמידים')
 
-      let stuUpserted = 0, membersLinked = 0, groupsCreated = 0, teachersSkipped = 0
-
-      for (let i = 0; i < parsedData.rows.length; i++) {
-        const row = parsedData.rows[i]
-        const cleanId = String(row.national_id || '').trim()
-        const unpadded = cleanId.replace(/^0+/, '')
-        const padded9 = cleanId.padStart(9, '0')
-
-        // Teacher Shield: Check if this row is a teacher by class, grade or existing teacher ID
-        const isTeacherRow = (
-          row.class_name === 'מורה' ||
-          (typeof row.class_name === 'string' && (row.class_name.includes('מורה') || row.class_name.includes('צוות'))) ||
-          row.grade === 99 ||
-          teacherNids.has(cleanId) ||
-          teacherNids.has(unpadded) ||
-          teacherNids.has(padded9)
-        )
-
-        if (isTeacherRow) {
-          teachersSkipped++
-          setProgress({ current: i + 1, total: parsedData.rows.length, type: 'students' })
-          continue
-        }
-
-        // 1. Upsert student record
-        const { data: stu, error: stuErr } = await supabase
-          .from('students')
-          .upsert({
-            national_id: cleanId,
-            name: row.name,
-            class_name: row.class_name,
-            is_active: true,
-            deleted_at: null
-          }, { onConflict: 'national_id' })
-          .select('id')
-          .single()
-
-        if (stuErr || !stu) {
-          console.error('Failed student upsert:', stuErr)
-          setProgress({ current: i + 1, total: parsedData.rows.length, type: 'students' })
-          continue
-        }
-        stuUpserted++
-
-        // 2. Resolve/Create Group without teacher_id (NULL) if it doesn't exist
-        if (row.group_number) {
-          let { data: grp } = await supabase
-            .from('student_groups')
-            .select('id, name')
-            .eq('group_number', row.group_number)
-            .maybeSingle()
-
-          const determinedGroupName = row.group_name 
-            ? `${row.group_name} (${row.group_number})` 
-            : `קבוצה ${row.group_number}`
-
-          if (!grp) {
-            // Group doesn't exist – create it with teacher_id = NULL
-            const { data: newGrp, error: grpErr } = await supabase
+      // 2. Link groups if group_number is present in rows
+      let groupsCreated = 0, membersLinked = 0
+      const rowsWithGroups = parsedData.rows.filter(r => r.group_number)
+      
+      if (rowsWithGroups.length > 0 && data.data && data.data.length > 0) {
+        for (let i = 0; i < rowsWithGroups.length; i++) {
+          const row = rowsWithGroups[i]
+          if (row.group_number) {
+            let { data: grp } = await supabase
               .from('student_groups')
-              .insert({
-                group_number: row.group_number,
-                name: determinedGroupName,
-                subject: row.group_name || null,
-                teacher_id: null // Safe: do NOT create teachers from names!
-              })
-              .select('id')
-              .single()
+              .select('id, name')
+              .eq('group_number', row.group_number)
+              .maybeSingle()
 
-            if (!grpErr && newGrp) {
-              grp = newGrp
-              groupsCreated++
-            } else if (grpErr) {
-              throw new Error(`נכשל ביצירת קבוצה חדשה ${row.group_number}: ${grpErr.message}`)
-            }
-          } else {
-            // If group already exists, but has a generic name and we have a specific name now, upgrade it
-            if (grp && row.group_name && grp.name === `קבוצה ${row.group_number}`) {
-              const { error: updGrpErr } = await supabase
+            const determinedGroupName = row.group_name 
+              ? `${row.group_name} (${row.group_number})` 
+              : `קבוצה ${row.group_number}`
+
+            if (!grp) {
+              const { data: newGrp, error: grpErr } = await supabase
                 .from('student_groups')
-                .update({
+                .insert({
+                  group_number: row.group_number,
                   name: determinedGroupName,
-                  subject: row.group_name
+                  subject: row.group_name || null,
+                  teacher_id: null
                 })
-                .eq('id', grp.id)
-              
-              if (updGrpErr) {
-                throw new Error(`נכשל בעדכון שם הקבוצה ${row.group_number}: ${updGrpErr.message}`)
+                .select('id')
+                .single()
+
+              if (!grpErr && newGrp) {
+                grp = newGrp
+                groupsCreated++
               }
             }
-          }
 
-          if (grp) {
-            // 3. Upsert student group membership
-            const { error: memErr } = await supabase
-              .from('student_group_members')
-              .upsert({
-                group_id: grp.id,
-                student_id: stu.id
-              }, { onConflict: 'group_id,student_id' })
-            
-            if (!memErr) {
-              membersLinked++
+            const stuRecord = data.data.find(s => s.name === row.name && s.class_name === row.class_name)
+            if (grp && stuRecord) {
+              const { error: memErr } = await supabase
+                .from('student_group_members')
+                .upsert({
+                  group_id: grp.id,
+                  student_id: stuRecord.id
+                }, { onConflict: 'group_id,student_id' })
+              if (!memErr) membersLinked++
             }
           }
+          setProgress({ current: i + 1, total: rowsWithGroups.length, type: 'students' })
         }
-        setProgress({ current: i + 1, total: parsedData.rows.length, type: 'students' })
       }
 
-      let successMsg = `✅ קליטת התלמידים והשיבוצים הושלמה! יובאו/עודכנו ${stuUpserted} תלמידים, נוצרו ${groupsCreated} קבוצות לימוד חדשות (ללא מורה), וקושרו ${membersLinked} שיוכי תלמידים לקבוצות.`
-      if (teachersSkipped > 0) {
-        successMsg += ` 🛡️ זוהו ודולגו ${teachersSkipped} רשומות מורים כדי למנוע כפילויות בטבלת התלמידים.`
-      }
-      setSuccess(successMsg)
+      setSuccess(`✅ יובאו בהצלחה ${data.count} תלמידים (דולגו ${data.skipped_teachers || 0} מורים). נוצרו ${groupsCreated} קבוצות ושויכו ${membersLinked} חברויות לקבוצות.`)
       setParsedData(null)
-      loadOrphanGroups()
     } catch (err) {
-      setError('שגיאה במהלך שמירת התלמידים: ' + err.message)
+      setError('שגיאה בתהליך ייבוא התלמידים: ' + err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  // ─── Independent Delete All Groups ─────────────────────────────
   const initiateDeleteAllGroups = () => {
     setDeleteConfirmText('')
     setShowDeleteModal1(true)

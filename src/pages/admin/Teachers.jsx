@@ -23,7 +23,7 @@ export default function Teachers() {
   }
 
   const filtered = teachers.filter(t =>
-    t.name.includes(search) || t.national_id.includes(search)
+    (t.name && t.name.includes(search)) || (t.id_last4 && t.id_last4.includes(search)) || (t.email && t.email.includes(search))
   )
 
   async function addTeacher(e) {
@@ -161,7 +161,7 @@ export default function Teachers() {
                   <tr key={t.id}>
                     <td style={{ fontWeight: 600 }}>{t.name}</td>
                     <td style={{ fontFamily: 'monospace', letterSpacing: '0.05em' }}>
-                      {t.national_id}
+                      {t.id_last4 ? `***${t.id_last4}` : '—'}
                     </td>
                     <td className="text-muted">{t.email || '—'}</td>
                     <td>

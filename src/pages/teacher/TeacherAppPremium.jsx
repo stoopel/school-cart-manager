@@ -635,7 +635,7 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
       const combinedIds = Array.from(new Set([...existingIds, ...newIds]))
 
       const { error } = await supabase.rpc('secure_pre_assign_students', {
-        entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
+        entered_teacher_id: teacher.id_hash || teacher.id,
         target_lesson_id: lesson.id,
         student_ids: combinedIds
       })
@@ -663,7 +663,7 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
       const combinedIds = Array.from(new Set([...existingIds, ...newIds]))
 
       const { error } = await supabase.rpc('secure_pre_assign_students', {
-        entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
+        entered_teacher_id: teacher.id_hash || teacher.id,
         target_lesson_id: lesson.id,
         student_ids: combinedIds
       })
@@ -688,7 +688,7 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
       const combinedIds = Array.from(new Set([...existingIds, ...selectedStudents]))
 
       const { error } = await supabase.rpc('secure_pre_assign_students', {
-        entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
+        entered_teacher_id: teacher.id_hash || teacher.id,
         target_lesson_id: lesson.id,
         student_ids: combinedIds
       })
@@ -1148,7 +1148,7 @@ function TeacherDashboard({ teacher, onLogout }) {
     if (!newGroupName.trim()) return
     setSavingGroup(true)
     const { data, error } = await supabase.rpc('secure_create_teacher_group', {
-      entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
+      entered_teacher_id: teacher.id_hash || teacher.id,
       group_name: newGroupName.trim()
     })
     setSavingGroup(false)
@@ -1164,7 +1164,7 @@ function TeacherDashboard({ teacher, onLogout }) {
   async function handleDeleteGroup(groupId, groupName) {
     if (!confirm(`האם אתה בטוח שברצונך למחוק את הקבוצה "${groupName}"?`)) return
     const { data, error } = await supabase.rpc('secure_delete_teacher_group', {
-      entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
+      entered_teacher_id: teacher.id_hash || teacher.id,
       target_group_id: groupId
     })
     if (error || (data && !data.success)) {
@@ -1177,7 +1177,7 @@ function TeacherDashboard({ teacher, onLogout }) {
   async function handleSaveMembers() {
     setSavingMembers(true)
     const { data, error } = await supabase.rpc('secure_set_group_members', {
-      entered_teacher_id: teacher.id_hash || teacher.id || teacher.national_id,
+      entered_teacher_id: teacher.id_hash || teacher.id,
       target_group_id: groupMembersToEdit.id,
       student_ids: selectedStudentIds
     })

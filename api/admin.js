@@ -135,38 +135,49 @@ export default async function handler(req, res) {
       }
       if (action === 'save' || action === 'save_student') {
         if (student.id) {
-          const result = await supabaseAdmin.from('students').update(student).eq('id', student.id).select().single()
+          const { national_id, ...cleanStudent } = student
+          const updatePayload = { ...cleanStudent }
+          if (national_id) {
+            updatePayload.id_hash = normalizeAndHashId(national_id)
+            updatePayload.id_last4 = getIdLast4(national_id)
+          }
+          const result = await supabaseAdmin.from('students').update(updatePayload).eq('id', cleanStudent.id).select().single()
           if (result.error) return res.status(500).json({ error: result.error.message })
           return res.status(200).json({ student: result.data })
         } else {
           const cleanId = (student.national_id || '').trim()
-          const unpadded = cleanId.replace(/^0+/, '')
-          const padded9 = cleanId.padStart(9, '0')
+          if (!cleanId) return res.status(400).json({ error: 'תעודת זהות הינה שדה חובה' })
+          const idHash = normalizeAndHashId(cleanId)
+          const idLast4 = getIdLast4(cleanId)
 
           // Teacher Shield: Disallow adding student if ID belongs to an active teacher
           const { data: teacherMatch } = await supabaseAdmin
             .from('teachers')
             .select('id, name')
-            .or(`national_id.eq.${cleanId},national_id.eq.${unpadded},national_id.eq.${padded9}`)
+            .eq('id_hash', idHash)
             .eq('is_active', true)
             .limit(1)
 
           if (teacherMatch && teacherMatch.length > 0) {
-            return res.status(400).json({ error: `תעודת זהות זו שייכת למורה (${teacherMatch[0].name}). לא ניתן להוסיף מורה כתלמיד.` })
+            return res.status(400).json({ error: `תעודת זהות שייכת למורה במערכת (${teacherMatch[0].name}). לא ניתן להוסיף מורה כתלמיד.` })
           }
 
           const { data: existing } = await supabaseAdmin
             .from('students')
             .select('*')
-            .eq('national_id', cleanId)
+            .eq('id_hash', idHash)
             .maybeSingle()
+
+          const { national_id, ...cleanStudentData } = student
 
           if (existing) {
             if (existing.is_active === false) {
               const { data: reactivated, error: reactErr } = await supabaseAdmin
                 .from('students')
                 .update({
-                  ...student,
+                  ...cleanStudentData,
+                  id_hash: idHash,
+                  id_last4: idLast4,
                   is_active: true,
                   deleted_at: null
                 })
@@ -181,12 +192,10 @@ export default async function handler(req, res) {
             }
           }
 
-          const sNormId = (student.national_id || '').replace(/\D/g, '').padStart(9, '0')
           const result = await supabaseAdmin.from('students').insert({
-            ...student,
-            national_id: sNormId,
-            id_hash: normalizeAndHashId(sNormId),
-            id_last4: sNormId.slice(-4),
+            ...cleanStudentData,
+            id_hash: idHash,
+            id_last4: idLast4,
             is_active: true
           }).select().single()
           if (result.error) return res.status(500).json({ error: result.error.message })
@@ -258,22 +267,34 @@ export default async function handler(req, res) {
       }
       if (action === 'save' || action === 'save_teacher') {
         if (teacher.id) {
-          const result = await supabaseAdmin.from('teachers').update(teacher).eq('id', teacher.id).select().single()
+          const { national_id, ...cleanTeacher } = teacher
+          const updatePayload = { ...cleanTeacher }
+          if (national_id) {
+            updatePayload.id_hash = normalizeAndHashId(national_id)
+            updatePayload.id_last4 = getIdLast4(national_id)
+          }
+          const result = await supabaseAdmin.from('teachers').update(updatePayload).eq('id', cleanTeacher.id).select().single()
           if (result.error) return res.status(500).json({ error: result.error.message })
           return res.status(200).json({ teacher: result.data })
         } else {
           const cleanId = (teacher.national_id || '').trim()
+          if (!cleanId) return res.status(400).json({ error: 'תעודת זהות הינה שדה חובה' })
+          const idHash = normalizeAndHashId(cleanId)
+          const idLast4 = getIdLast4(cleanId)
+
           const { data: existing } = await supabaseAdmin
             .from('teachers')
             .select('*')
-            .eq('national_id', cleanId)
+            .eq('id_hash', idHash)
             .maybeSingle()
+
+          const { national_id, ...cleanTeacherData } = teacher
 
           if (existing) {
             if (existing.is_active === false) {
               const { data: reactivated, error: reactErr } = await supabaseAdmin
                 .from('teachers')
-                .update({ ...teacher, is_active: true })
+                .update({ ...cleanTeacherData, id_hash: idHash, id_last4: idLast4, is_active: true })
                 .eq('id', existing.id)
                 .select()
                 .single()
@@ -281,13 +302,10 @@ export default async function handler(req, res) {
               if (reactErr) return res.status(500).json({ error: reactErr.message })
 
               // Bidirectional Shield: Deactivate matching student records on reactivation
-              const unpadded = cleanId.replace(/^0+/, '')
-              const padded9 = cleanId.padStart(9, '0')
-              const allVariantIds = [...new Set([cleanId, unpadded, padded9])]
               await supabaseAdmin
                 .from('students')
                 .update({ is_active: false, deleted_at: new Date().toISOString() })
-                .in('national_id', allVariantIds)
+                .eq('id_hash', idHash)
 
               return res.status(200).json({ teacher: reactivated, reactivated: true })
             } else {
@@ -296,20 +314,15 @@ export default async function handler(req, res) {
           }
 
           // Bidirectional Shield: Deactivate matching student records
-          const unpadded = cleanId.replace(/^0+/, '')
-          const padded9 = cleanId.padStart(9, '0')
-          const allVariantIds = [...new Set([cleanId, unpadded, padded9])]
           await supabaseAdmin
             .from('students')
             .update({ is_active: false, deleted_at: new Date().toISOString() })
-            .in('national_id', allVariantIds)
+            .eq('id_hash', idHash)
 
-          const tNormId = (teacher.national_id || '').replace(/\D/g, '').padStart(9, '0')
           const result = await supabaseAdmin.from('teachers').insert({
-            ...teacher,
-            national_id: tNormId,
-            id_hash: normalizeAndHashId(tNormId),
-            id_last4: tNormId.slice(-4),
+            ...cleanTeacherData,
+            id_hash: idHash,
+            id_last4: idLast4,
             is_active: true
           }).select().single()
           if (result.error) return res.status(500).json({ error: result.error.message })
@@ -360,50 +373,37 @@ export default async function handler(req, res) {
       if (!type || !Array.isArray(records)) return res.status(400).json({ error: 'type and records array are required' })
 
       if (type === 'students') {
-        // Pre-fetch all teacher IDs to prevent any teacher from ever being inserted into students table
-        const { data: teacherList } = await supabaseAdmin.from('teachers').select('national_id')
-        const teacherNids = new Set()
-        if (teacherList) {
-          for (const t of teacherList) {
-            if (t.national_id) {
-              const raw = String(t.national_id).trim()
-              teacherNids.add(raw)
-              teacherNids.add(raw.replace(/^0+/, ''))
-              teacherNids.add(raw.padStart(9, '0'))
-            }
-          }
-        }
+        // Pre-fetch all teacher id_hash to prevent any teacher from ever being inserted into students table
+        const { data: teacherList } = await supabaseAdmin.from('teachers').select('id_hash')
+        const teacherHashes = new Set(teacherList ? teacherList.map(t => t.id_hash).filter(Boolean) : [])
 
         let skippedTeachersCount = 0
         const uniqueRecords = Object.values(
           records.reduce((acc, r) => {
-            if (r.national_id) {
-              const cleanId = String(r.national_id).trim()
-              const unpadded = cleanId.replace(/^0+/, '')
-              const padded9 = cleanId.padStart(9, '0')
+            const rawId = r.national_id || r.id_number || r.id_hash
+            if (rawId) {
+              const idHash = normalizeAndHashId(rawId)
+              const idLast4 = getIdLast4(rawId)
 
               const isTeacher = (
                 r.class_name === 'מורה' ||
-                (typeof r.class_name === 'string' && (r.class_name.includes('מורה') || r.class_name.includes('צוות'))) ||
+                (typeof r.class_name === 'string' && (r.class_name.includes('מורה') || r.class_name.includes('סגל'))) ||
                 r.grade === 99 ||
-                teacherNids.has(cleanId) ||
-                teacherNids.has(unpadded) ||
-                teacherNids.has(padded9)
+                teacherHashes.has(idHash)
               )
 
               if (isTeacher) {
                 skippedTeachersCount++
               } else {
-                const idNorm = cleanId.replace(/\D/g, '').padStart(9, '0')
-                  acc[cleanId] = {
-                    ...acc[cleanId],
-                    ...r,
-                    national_id: idNorm,
-                    id_hash: normalizeAndHashId(idNorm),
-                    id_last4: idNorm.slice(-4),
-                    is_active: true,
-                    deleted_at: null
-                  }
+                const { national_id, id_number, ...cleanData } = r
+                acc[idHash] = {
+                  ...acc[idHash],
+                  ...cleanData,
+                  id_hash: idHash,
+                  id_last4: idLast4,
+                  is_active: true,
+                  deleted_at: null
+                }
               }
             }
             return acc
@@ -414,46 +414,43 @@ export default async function handler(req, res) {
           return res.status(200).json({ success: true, count: 0, unique_count: 0, skipped_teachers: skippedTeachersCount })
         }
 
-        const { data, error } = await supabaseAdmin.from('students').upsert(uniqueRecords, { onConflict: 'national_id' }).select()
+        const { data, error } = await supabaseAdmin.from('students').upsert(uniqueRecords, { onConflict: 'id_hash' }).select()
         if (error) return res.status(500).json({ error: error.message, unique_count: uniqueRecords.length })
-        return res.status(200).json({ success: true, count: data?.length || 0, unique_count: uniqueRecords.length, skipped_teachers: skippedTeachersCount })
+        return res.status(200).json({ success: true, count: data?.length || 0, unique_count: uniqueRecords.length, skipped_teachers: skippedTeachersCount, data })
       }
 
       if (type === 'teachers') {
         const uniqueRecords = Object.values(
           records.reduce((acc, r) => {
-            if (r.national_id) {
-              const cleanId = String(r.national_id).trim()
-              const idNorm = cleanId.replace(/\D/g, '').padStart(9, '0')
-                acc[cleanId] = {
-                  ...acc[cleanId],
-                  ...r,
-                  national_id: idNorm,
-                  id_hash: normalizeAndHashId(idNorm),
-                  id_last4: idNorm.slice(-4),
-                  is_active: true
-                }
+            const rawId = r.national_id || r.id_number || r.id_hash
+            if (rawId) {
+              const idHash = normalizeAndHashId(rawId)
+              const idLast4 = getIdLast4(rawId)
+              const { national_id, id_number, ...cleanData } = r
+              acc[idHash] = {
+                ...acc[idHash],
+                ...cleanData,
+                id_hash: idHash,
+                id_last4: idLast4,
+                is_active: true
+              }
             }
             return acc
           }, {})
         )
-        const { data, error } = await supabaseAdmin.from('teachers').upsert(uniqueRecords, { onConflict: 'national_id' }).select()
+        const { data, error } = await supabaseAdmin.from('teachers').upsert(uniqueRecords, { onConflict: 'id_hash' }).select()
         if (error) return res.status(500).json({ error: error.message })
 
-        // Bidirectional Shield: Clean up / deactivate any matching national IDs from students table
-        const teacherIds = uniqueRecords.map(r => r.national_id).filter(Boolean)
-        if (teacherIds.length > 0) {
-          const unpaddedIds = teacherIds.map(id => id.replace(/^0+/, ''))
-          const paddedIds = teacherIds.map(id => id.padStart(9, '0'))
-          const allVariantIds = [...new Set([...teacherIds, ...unpaddedIds, ...paddedIds])]
-
+        // Bidirectional Shield: Clean up / deactivate any matching id_hash from students table
+        const teacherHashes = uniqueRecords.map(r => r.id_hash).filter(Boolean)
+        if (teacherHashes.length > 0) {
           await supabaseAdmin
             .from('students')
             .update({ is_active: false, deleted_at: new Date().toISOString() })
-            .in('national_id', allVariantIds)
+            .in('id_hash', teacherHashes)
         }
 
-        return res.status(200).json({ success: true, count: data?.length || 0 })
+        return res.status(200).json({ success: true, count: data?.length || 0, unique_count: uniqueRecords.length })
       }
     }
 

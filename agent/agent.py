@@ -737,8 +737,8 @@ class CartAgent:
         log.info("Teacher locked screens")
         self._unlocked = False
         if self.screen:
-            self.screen.show_teacher_locked("המורה הפסיק את השיעור זמנית. הקשב למורה. ⏸️")
             self.screen.relock("השיעור בהשהיה")
+            self.screen.show_teacher_locked("המורה הפסיק את השיעור זמנית. הקשב למורה. ⏸️")
 
     # ── Lesson Timer Loop ─────────────────────────────────────
 

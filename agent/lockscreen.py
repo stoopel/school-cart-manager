@@ -1257,7 +1257,7 @@ class LockScreen:
     # ── Numpad logic ──────────────────────────────────────────
 
     def _on_digit(self, ch):
-        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
+        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False) or self._step in (3, 4):
             return
         max_len = 4 if self._step == 2 else 9
         if len(self.entered_id) < max_len:
@@ -1279,7 +1279,7 @@ class LockScreen:
             self._on_digit(event.char)
 
     def _on_submit(self):
-        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
+        if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False) or self._step in (3, 4):
             return
         if not self.entered_id:
             return

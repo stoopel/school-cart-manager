@@ -1295,13 +1295,8 @@ class LockScreen:
         """ESC בשלב 2 – חזרה לשלב 1"""
         if getattr(self, "_wifi_panel_active", False) or getattr(self, "_verifying", False):
             return
-        if self._step == 2:
-            self._step = 1
-            self.entered_id = ""
-            self.lbl_display.config(text="")
-            self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
-            self.lbl_subtitle.config(text=self.loan_data.get('student_name','') if self.loan_data else "")
-            self.show_status("")
+        if self._step in (2, 3):
+            self.cancel_lesson_selection()
 
     # ── Wi-Fi ─────────────────────────────────────────────────
 
@@ -1839,14 +1834,11 @@ class LockScreen:
         if self._step == 1:
             self._apply_loan_state()
         elif self._step == 2:
-            self.lbl_display.master.pack(fill="x", pady=(0, 12))
-            if hasattr(self, 'pad_frame'):
-                self.pad_frame.pack()
-            self.btn_submit.pack(fill="x", pady=(10, 0))
-            self.lbl_status.pack(pady=(8, 0))
-            self.lbl_title.config(text="הכנס קוד שיעור (4 ספרות)", fg=ACCENT)
-            self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך", fg=TEXT_DIM)
-            self.lbl_status.config(text="")
+            self.show_lesson_selection(
+                getattr(self, '_current_lessons', []),
+                getattr(self, '_current_on_select', None),
+                getattr(self, '_current_disconnected_lesson_id', None)
+            )
         elif self._step == 3:
             self._step = 1
             self._apply_loan_state()
@@ -1928,42 +1920,8 @@ class LockScreen:
         self.root.after(0, lambda: self.lbl_status.config(text=msg, fg=color))
 
     def show_lesson_code_prompt(self):
-        """מעבר לשלב 2 – הכנסת קוד שיעור"""
-        self._step = 2
-        self.entered_id = ""
-        self._wifi_panel_active = False
-        def _do():
-            self.clear_selection_screen()
-            if hasattr(self, 'wifi_container') and self.wifi_container:
-                try:
-                    self.wifi_container.destroy()
-                except Exception:
-                    pass
-                self.wifi_container = None
-            
-            # Repack title and subtitle at the top
-            self.lbl_title.pack_forget()
-            self.lbl_subtitle.pack_forget()
-            self.lbl_title.pack(pady=(0, 4))
-            self.lbl_subtitle.pack(pady=(0, 12))
-            
-            # Repack standard widgets
-            self.lbl_display.master.pack(fill="x", pady=(0, 12))
-            if hasattr(self, 'pad_frame'):
-                self.pad_frame.pack()
-            self.btn_submit.pack(fill="x", pady=(10, 0))
-            self.lbl_status.pack(pady=(8, 0))
-            
-            self.lbl_display.config(text="")
-            self.lbl_title.config(text="הכנס קוד שיעור (4 ספרות)", fg=ACCENT)
-            self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך")
-            self.lbl_status.config(text="")
-            self.update_lesson_timer("")
-            self.root.deiconify()
-            self.root.lift()
-            self.root.attributes("-topmost", True)
-            self.root.focus_force()
-        self.root.after(0, _do)
+        """מעבר לשלב 2 – הכנסת קוד שיעור ידני"""
+        self.show_lesson_selection([], None)
 
     def show_lesson_ended(self):
         """מציג הודעת סיום שיעור"""
@@ -2094,45 +2052,100 @@ class LockScreen:
         self.root.after(500, self._check_uninstall_loop)
 
 
-    def show_lesson_selection(self, lessons: list, on_select):
-        """מציג מסך בחירת שיעור מתוך רשימה לתלמיד ששויך למספר שיעורים במקביל"""
-        self._step = 3  # שלב בחירה
+    def show_lesson_selection(self, lessons: list = None, on_select = None, disconnected_lesson_id: str = None):
+        """מציג מסך בחירת שיעור היברידי (כפתורי שיעור משויך + לוח מקשים לקוד 4 ספרות)"""
+        self._step = 2
+        self.entered_id = ""
+        self._wifi_panel_active = False
+        self._current_lessons = lessons or []
+        self._current_on_select = on_select
+        self._current_disconnected_lesson_id = disconnected_lesson_id
+
         def _do():
-            # hide numpad, display, and submit button
+            self.clear_selection_screen()
+            if hasattr(self, 'wifi_container') and self.wifi_container:
+                try:
+                    self.wifi_container.destroy()
+                except Exception:
+                    pass
+                self.wifi_container = None
+
+            # Repack title and subtitle at top
+            self.lbl_title.pack_forget()
+            self.lbl_subtitle.pack_forget()
+
+            if self._current_lessons:
+                self.lbl_title.pack(pady=(0, 2))
+                self.lbl_subtitle.pack(pady=(0, 6))
+                self.lbl_title.config(text="התחברות לשיעור", fg=ACCENT)
+                self.lbl_subtitle.config(text="בחר שיעור משויך בלחיצה, או הקלד קוד שיעור:", fg=TEXT_DIM)
+
+                # Create selection frame for 1-click lesson cards
+                self.select_frame = tk.Frame(self.lbl_title.master, bg=BG_CARD)
+                self.select_frame.pack(fill="x", pady=(0, 4))
+
+                for lesson in self._current_lessons:
+                    l_id = lesson.get("lesson_id") or lesson.get("id")
+                    subj = lesson.get("subject", "שיעור")
+                    teacher = lesson.get("teacher_name", "מורה")
+                    is_reconn = lesson.get("is_reconnect", False) or (disconnected_lesson_id and l_id == disconnected_lesson_id)
+
+                    if is_reconn:
+                        lbl_text = f"🔄 חזור לשיעור: {subj} ({teacher})"
+                        btn_bg = "#1e3a5f"
+                        btn_fg = "#93c5fd"
+                        btn_abg = "#2563eb"
+                        btn_afg = "#ffffff"
+                    else:
+                        lbl_text = f"📚 היכנס לשיעור: {subj} ({teacher})"
+                        btn_bg = BG_INPUT
+                        btn_fg = TEXT_MAIN
+                        btn_abg = "#2a3550"
+                        btn_afg = TEXT_NUM
+
+                    btn = tk.Button(
+                        self.select_frame, text=lbl_text, font=self.font_small,
+                        bg=btn_bg, fg=btn_fg, activebackground=btn_abg, activeforeground=btn_afg,
+                        bd=1, relief="solid", highlightthickness=0,
+                        padx=10, pady=6, cursor="hand2", anchor="center",
+                        command=lambda l=lesson: [self.clear_selection_screen(), on_select(l) if on_select else None]
+                    )
+                    btn.pack(fill="x", pady=2)
+
+                lbl_divider = tk.Label(
+                    self.select_frame, text="— או הקלד קוד שיעור ידני (4 ספרות) —",
+                    font=self.font_small, bg=BG_CARD, fg=TEXT_DIM
+                )
+                lbl_divider.pack(pady=(4, 2))
+            else:
+                self.lbl_title.pack(pady=(0, 4))
+                self.lbl_subtitle.pack(pady=(0, 12))
+                self.lbl_title.config(text="הכנס קוד שיעור (4 ספרות)", fg=ACCENT)
+                self.lbl_subtitle.config(text="קבל את הקוד מהמורה שלך", fg=TEXT_DIM)
+
+            # Repack display frame, numpad, submit button, status
             self.lbl_display.master.pack_forget()
             if hasattr(self, 'pad_frame'):
                 self.pad_frame.pack_forget()
             self.btn_submit.pack_forget()
-            
-            self.lbl_title.config(text="בחר את השיעור שלך", fg=ACCENT)
-            self.lbl_subtitle.config(text="שויכת למספר שיעורים פעילים במקביל. בחר אחד:")
-            self.lbl_status.config(text="")
-            
-            # create selection container
-            self.select_frame = tk.Frame(self.lbl_title.master, bg=BG_CARD)
-            self.select_frame.pack(fill="x", pady=20)
-            
-            # Add a button for each lesson
-            for lesson in lessons:
-                lbl = f"📚 {lesson.get('subject', 'שיעור')} ({lesson.get('teacher_name', 'מורה')})"
-                btn = tk.Button(
-                    self.select_frame, text=lbl, font=self.font_sub,
-                    bg=BG_INPUT, fg=TEXT_MAIN, activebackground="#2a3550",
-                    activeforeground=TEXT_NUM, bd=1, relief="solid", highlightthickness=0,
-                    padx=15, pady=12, cursor="hand2", anchor="w",
-                    command=lambda l=lesson: [self.clear_selection_screen(), on_select(l)]
-                )
-                btn.pack(fill="x", pady=6)
-                
-            # Add a cancel button to go back to T.Z. input
-            btn_cancel = tk.Button(
-                self.select_frame, text="❌ ביטול וחזרה", font=self.font_small,
-                bg="rgba(239,68,68,0.15)", fg="#fca5a5", activebackground="#3d2121",
-                bd=0, padx=15, pady=8, cursor="hand2",
-                command=self.cancel_lesson_selection
-            )
-            btn_cancel.pack(fill="x", pady=(20, 0))
-            
+            self.lbl_status.pack_forget()
+
+            disp_pad = 6 if self._current_lessons else 12
+            btn_pad = 6 if self._current_lessons else 10
+
+            self.lbl_display.master.pack(fill="x", pady=(0, disp_pad))
+            self.lbl_display.config(text="")
+            if hasattr(self, 'pad_frame'):
+                self.pad_frame.pack()
+            self.btn_submit.pack(fill="x", pady=(btn_pad, 0))
+            self.lbl_status.pack(pady=(6, 0))
+
+            self.update_lesson_timer("")
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.focus_force()
+
         self.root.after(0, _do)
 
     def clear_selection_screen(self):
@@ -2145,19 +2158,12 @@ class LockScreen:
 
     def cancel_lesson_selection(self):
         self.clear_selection_screen()
+        self._current_lessons = []
+        self._current_on_select = None
+        self._current_disconnected_lesson_id = None
         self._step = 1
         self.entered_id = ""
-        
-        # restore widgets
-        self.lbl_display.master.pack(fill="x", pady=(0, 12))
-        if hasattr(self, 'pad_frame'):
-            self.pad_frame.pack()
-        self.btn_submit.pack(fill="x", pady=(10, 0))
-        
-        self.lbl_title.config(text="הקש את תעודת הזהות שלך", fg=TEXT_MAIN)
-        self.lbl_subtitle.config(text=f"המחשב הוצא על שם: {self.loan_data.get('student_name', '')} | כיתה {self.loan_data.get('class_name', '')}" if self.loan_data else "")
-        self.lbl_display.config(text="")
-        self.show_status("")
+        self._apply_loan_state()
 
     def show_teacher_locked(self, message: str = "השיעור מושהה כעת. הקשב למורה. ⏸️"):
         """מציג מסך נעילת מורה ללא אפשרות הקשה או כפתורים"""

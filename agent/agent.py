@@ -391,47 +391,8 @@ class CartAgent:
                     return
 
             student_id = self.loan_data.get("student_id") if self.loan_data else None
-            pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else None
-            if pre_assigned:
-                if len(pre_assigned) == 1:
-                    # שיעור יחיד - כניסה אוטומטית ישירה
-                    lesson = pre_assigned[0]
-                    self._lesson_data = lesson
-                    joined = db.join_lesson(
-                        lesson["lesson_id"],
-                        self.loan_data["loan_id"],
-                        self.loan_data["device_id"],
-                        self.loan_data["student_id"],
-                    )
-                    if joined:
-                        log.info(f"Auto-joined pre-assigned active lesson {lesson['lesson_id']}")
-                        self._lesson_timer = LessonTimer(
-                            lesson["end_time"],
-                            server_now_str=lesson.get("server_now")
-                        )
-                        self._start_lesson_realtime(lesson["lesson_id"])
-                        db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
-                        self.screen.root.after(0, lambda: [
-                            self.screen.set_verifying(False),
-                            self._do_unlock(self.loan_data["student_name"])
-                        ])
-                        return
-                    else:
-                        self.screen.root.after(0, lambda: [
-                            self.screen.set_verifying(False),
-                            self.screen.show_status("שגיאה בהצטרפות לשיעור. נסה שוב.", "#ef4444")
-                        ])
-                        return
-                else:
-                    # מספר שיעורים במקביל - הצגת ממשק בחירה
-                    log.info(f"Multiple pre-assigned active lessons found: {len(pre_assigned)}")
-                    self.screen.root.after(0, lambda: [
-                        self.screen.set_verifying(False),
-                        self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected)
-                    ])
-                    return
+            pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else []
 
-            # 7. לא נמצא שיוך מראש - דרישת קוד שיעור פעיל כרגיל
             warn_msg = None
             warn_color = None
             if enable_tracking and strikes == 2:
@@ -441,6 +402,16 @@ class CartAgent:
                 warn_msg = "⚠️ שים לב: לא חיברת מחשב לטעינה בפעם הקודמת."
                 warn_color = "#fbbf24"
 
+            if pre_assigned:
+                log.info(f"Pre-assigned active lesson(s) found: {len(pre_assigned)}. Showing hybrid selection screen.")
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected),
+                    self.screen.show_status(warn_msg, warn_color) if warn_msg else None
+                ])
+                return
+
+            # לא נמצא שיוך מראש - הצגת מסך הקשת קוד שיעור ידני כרגיל
             self.screen.root.after(0, lambda: [
                 self.screen.set_verifying(False),
                 self.screen.show_lesson_code_prompt(),
@@ -474,10 +445,16 @@ class CartAgent:
                 )
                 self._start_lesson_realtime(lesson["lesson_id"])
                 db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
-                self.screen.root.after(0, lambda: [
-                    self.screen.set_verifying(False),
-                    self._do_unlock(self.loan_data["student_name"])
-                ])
+                if lesson.get("is_locked"):
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self._lock_teacher_pause()
+                    ])
+                else:
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self._do_unlock(self.loan_data["student_name"])
+                    ])
             else:
                 self.screen.root.after(0, lambda: [
                     self.screen.set_verifying(False),
@@ -594,6 +571,7 @@ class CartAgent:
 
     def _on_student_disconnect(self):
         log.info("Student requested disconnection from lesson via floating widget.")
+        prev_lesson = dict(self._lesson_data) if self._lesson_data else None
         self._unlocked = False
         self._lesson_data = None
         self._lesson_timer = None
@@ -605,9 +583,9 @@ class CartAgent:
             self.screen.relock("מתנתק מהשיעור... ⏳")
             
         # Run DB updates in a background thread to prevent GUI lag
-        threading.Thread(target=self._async_student_disconnect, daemon=True).start()
+        threading.Thread(target=self._async_student_disconnect, args=(prev_lesson,), daemon=True).start()
 
-    def _async_student_disconnect(self):
+    def _async_student_disconnect(self, prev_lesson=None):
         try:
             if not self.loan_data or not self.loan_data.get("loan_id"):
                 log.warning("Disconnection requested but no active loan found locally.")
@@ -616,7 +594,7 @@ class CartAgent:
             loan_id = self.loan_data.get("loan_id")
             device_id = self.loan_data.get("device_id")
             student_id = self.loan_data.get("student_id")
-            lesson_id = self._lesson_data["lesson_id"] if self._lesson_data else None
+            lesson_id = prev_lesson.get("lesson_id") if prev_lesson else None
 
             log.info(f"Disconnecting student_id={student_id} from lesson_id={lesson_id}")
             
@@ -625,18 +603,39 @@ class CartAgent:
             if lesson_id:
                 db.log_event(device_id, loan_id, "student_disconnect", {"lesson_id": lesson_id})
 
-            # 3. Clean up local state
+            # Clean up local state
             self._lesson_data = None
             self._lesson_timer = None
             if self._rt_lesson:
                 self._rt_lesson.stop()
                 self._rt_lesson = None
 
-            # 4. Update UI lock message to show successful disconnection
+            # Fetch any active pre-assigned lessons
+            pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else []
+            if pre_assigned is None:
+                pre_assigned = []
+
+            # Ensure disconnected lesson is also offered if still active
+            if lesson_id:
+                active_prev = db.get_active_lesson_by_id(lesson_id)
+                reconn_obj = active_prev if active_prev else prev_lesson
+                if reconn_obj:
+                    reconn_obj["is_reconnect"] = True
+                    found = False
+                    for i, l in enumerate(pre_assigned):
+                        if l.get("lesson_id") == lesson_id:
+                            pre_assigned[i]["is_reconnect"] = True
+                            found = True
+                            break
+                    if not found:
+                        pre_assigned.insert(0, reconn_obj)
+
+            # Update UI lock message to show successful disconnection and offer hybrid selection
             if self.screen:
-                self.screen.root.after(0, lambda: self.screen.show_status("התנתקת מהשיעור בהצלחה.", "#22c55e"))
-                # Also restore the standard lesson code prompt
-                self.screen.root.after(0, self.screen.show_lesson_code_prompt)
+                self.screen.root.after(0, lambda: [
+                    self.screen.show_status("התנתקת מהשיעור. באפשרותך לחזור אליו או להזין קוד שיעור.", "#60a5fa"),
+                    self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected, disconnected_lesson_id=lesson_id)
+                ])
         except Exception as e:
             log.error(f"Error in _async_student_disconnect: {e}", exc_info=True)
             if self.screen:
@@ -719,16 +718,15 @@ class CartAgent:
         if self._rt_lesson: self._rt_lesson.stop(); self._rt_lesson = None
         if self.screen:
             if self.loan_data:
-                self.screen.relock("השיעור הסתיים. בחר או הכנס שיעור חדש.")
+                self.screen.relock("השיעור הסתיים. בחר שיעור או הכנס קוד חדש.")
                 try:
                     student_id = self.loan_data.get("student_id")
-                    pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else None
-                    if pre_assigned:
-                        self.screen.root.after(0, lambda: self.screen.show_lesson_selection(pre_assigned, self._on_lesson_selected))
-                        return
+                    pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else []
+                    self.screen.root.after(0, lambda: self.screen.show_lesson_selection(pre_assigned or [], self._on_lesson_selected))
+                    return
                 except Exception as e:
                     log.error(f"Error checking pre-assigned lessons on lesson end: {e}")
-                self.screen.root.after(0, self.screen.show_lesson_code_prompt)
+                self.screen.root.after(0, lambda: self.screen.show_lesson_selection([], self._on_lesson_selected))
             else:
                 self.screen.show_lesson_ended()
                 self.screen.relock("השיעור הסתיים. החזר את המחשב לתחנת העגלה. 🔌")
@@ -947,9 +945,16 @@ class CartAgent:
                     self.loan_data["lesson_id"] = new_lesson_id
 
                 if new_lesson_id:
-                    # Remote lesson assignment - auto join and unlock/pause
-                    threading.Thread(target=self._async_apply_new_lesson, 
-                                     args=(new_lesson_id,), daemon=True).start()
+                    if self._unlocked:
+                        threading.Thread(target=self._async_apply_new_lesson, 
+                                         args=(new_lesson_id,), daemon=True).start()
+                    else:
+                        if self.screen and getattr(self.screen, '_step', 1) == 2:
+                            student_id = self.loan_data.get("student_id") if self.loan_data else None
+                            pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else []
+                            self.screen.root.after(0, lambda: self.screen.show_lesson_selection(pre_assigned or [], self._on_lesson_selected))
+                        else:
+                            log.info(f"Remote lesson {new_lesson_id} assigned while locked (step 1). Student will select it after ID entry.")
                 else:
                     # Lesson was removed from the loan – lock/end lesson
                     log.info("Lesson ID removed from loan. Relocking.")

@@ -1128,10 +1128,8 @@ BEGIN
             SET lesson_id = NEW.lesson_id
             WHERE id = active_loan.id;
 
-            -- הצטרפות אוטומטית לשיעור (אם לא קיים כבר)
-            INSERT INTO public.lesson_participants (lesson_id, loan_id, device_id, student_id)
-            VALUES (NEW.lesson_id, active_loan.id, active_loan.device_id, NEW.student_id)
-            ON CONFLICT (lesson_id, device_id) DO NOTHING;
+                        -- בוטל ה-INSERT האוטומטי המוקדם ל-lesson_participants.
+            -- התלמיד ייכנס ל-lesson_participants רק כשיבחר בפועל להיכנס לשיעור.
         END IF;
 
     ELSIF (TG_OP = 'DELETE') THEN

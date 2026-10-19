@@ -94,16 +94,7 @@ def _delete(path, params=None):
     except Exception as e:
         log.error(f"DELETE {path}: {e}"); return None
 
-def _rpc(fn, params):
-    try:
-        r = requests.post(f"{SUPABASE_URL}/rest/v1/rpc/{fn}",
-                          headers=HEADERS, json=params, timeout=10, verify=False)
-        r.raise_for_status()
-        if r.status_code == 204 or not r.text.strip():
-            return True
-        return r.json()
-    except Exception as e:
-        log.error(f"RPC {fn}: {e}"); return None
+
 
 
 # ─── מחשב ─────────────────────────────────────────────────────
@@ -452,11 +443,14 @@ class RealtimeSubscription:
             except: break
 
 
-def verify_loan_auth(loan_id: str, entered_id: str) -> bool:
-    """Verifies student/teacher ID for loan via secure serverless endpoint"""
+def verify_loan_auth(loan_id: str, entered_id: str):
+    """Verifies student/teacher ID for loan via secure serverless endpoint.
+    Returns: True if valid, False if wrong ID, 'OFFLINE' if network error"""
     try:
         res = _api_post("verify_loan_auth", {"loanId": loan_id, "enteredId": entered_id})
-        return bool(res and res.get("isValid"))
+        if res is None:
+            return "OFFLINE"
+        return bool(res.get("isValid"))
     except Exception as e:
         log.error(f"verify_loan_auth error: {e}")
-        return False
+        return "OFFLINE"

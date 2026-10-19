@@ -5,6 +5,7 @@ agent.py - v4
 
 import json, os, sys, threading, time, socket, ctypes, logging
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from lockscreen import LockScreen, start_explorer
 import supabase_client as db
@@ -60,19 +61,71 @@ def get_battery_info():
     charging = s.ACLineStatus == 1
     return level, charging
 
-def is_connected():
+# Extract target host for HTTPS (port 443) reachability test
+_TARGET_HTTPS_HOST = "school-cart-manager.vercel.app"
+try:
+    if "api_base_url" in CONFIG:
+        _TARGET_HTTPS_HOST = urlparse(CONFIG["api_base_url"]).hostname or _TARGET_HTTPS_HOST
+    elif "supabase_url" in CONFIG:
+        _TARGET_HTTPS_HOST = urlparse(CONFIG["supabase_url"]).hostname or _TARGET_HTTPS_HOST
+except Exception:
+    pass
+
+def is_connected(agent_ref=None):
+    """
+    3-Layer Network Connectivity Check:
+    Layer 1 (0ms): Active Realtime WebSocket connection to Supabase.
+    Layer 2 (0ms): Windows native WinINet API (InternetGetConnectedState).
+    Layer 3 (HTTPS Port 443): Direct socket connection to project API server (Never uses 8.8.8.8:53).
+    """
+    # Layer 1: Realtime WebSocket state
+    if agent_ref:
+        try:
+            if getattr(agent_ref, "_rt_loan", None) and getattr(agent_ref._rt_loan, "is_connected", False):
+                return True
+            if getattr(agent_ref, "_rt_lesson", None) and getattr(agent_ref._rt_lesson, "is_connected", False):
+                return True
+        except Exception:
+            pass
+
+    # Layer 2: Windows WinINet (Hardware/Adapter & Internet state check)
+    win_online = False
+    try:
+        flags = ctypes.c_ulong()
+        win_online = bool(ctypes.windll.wininet.InternetGetConnectedState(ctypes.byref(flags), 0))
+        if not win_online:
+            return False
+    except Exception:
+        win_online = True
+
+    # Layer 3: Direct connection to project API server on HTTPS port 443
     s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3)
-        s.connect(("8.8.8.8", 53))
+        s.settimeout(2.0)
+        s.connect((_TARGET_HTTPS_HOST, 443))
         s.close()
         return True
     except Exception:
         if s:
             try: s.close()
             except: pass
-        return False
+
+    # Secondary fallback on port 443 (Cloudflare HTTPS 1.1.1.1:443 - allowed through all firewalls)
+    s2 = None
+    try:
+        s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s2.settimeout(1.5)
+        s2.connect(("1.1.1.1", 443))
+        s2.close()
+        return True
+    except Exception:
+        if s2:
+            try: s2.close()
+            except: pass
+
+    # If WinINet says network is active, return True as fallback
+    return win_online
 
 
 # ── Lesson Timer ──────────────────────────────────────────────
@@ -208,16 +261,8 @@ class CartAgent:
         try:
             log.info(f"Async Step1 ID: {entered[:3]}***")
 
-            # 2. אין השאלה פעילה או שהאינטרנט מנותק
-            if not is_connected():
-                self.screen.root.after(0, lambda: [
-                    self.screen.set_verifying(False),
-                    self.screen.show_status("⚠️ מחשב זה מנותק מהאינטרנט. אנא חבר ל-Wi-Fi או הזן קוד מנהל.", "#ef4444")
-                ])
-                return
-
+            # 1. ודא נתוני השאלה פעילים (אם טרם נטענו או שההשאלה בוצעה הרגע בעגלה)
             if not self.loan_data or not self.loan_data.get("student_name"):
-                # בדיקה חיה מול שרת ה-API למקרה שההשאלה בוצעה הרגע בקיוסק
                 live_loan = db.get_active_loan(ASSET_TAG)
                 if live_loan and live_loan != "OFFLINE" and live_loan.get("student_name"):
                     log.info(f"Live loan recovered on ID submit: {live_loan.get('loan_id')}")
@@ -233,6 +278,12 @@ class CartAgent:
                         self.screen.show_status("🚫 מחשב זה אינו רשום במערכת בית הספר.", "#ef4444")
                     ])
                     return
+                elif live_loan == "OFFLINE":
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("⚠️ מחשב זה מנותק מהאינטרנט. אנא חבר ל-Wi-Fi או הזן קוד מנהל.", "#ef4444")
+                    ])
+                    return
                 else:
                     self.screen.root.after(0, lambda: [
                         self.screen.set_verifying(False),
@@ -240,12 +291,19 @@ class CartAgent:
                     ])
                     return
 
-            # 3. בדיקה האם זו השאלת מורה חוקית (Teacher Loan מעגלת ההשאלה)
+            # 2. בדיקה האם זו השאלת מורה חוקית (Teacher Loan מעגלת ההשאלה)
             if self.loan_data.get("is_teacher_loan"):
                 loan_id = str(self.loan_data.get("loan_id", ""))
-                is_authenticated = db.verify_loan_auth(loan_id, entered) if loan_id else False
+                auth_result = db.verify_loan_auth(loan_id, entered) if loan_id else False
 
-                if not is_authenticated:
+                if auth_result == "OFFLINE":
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.show_status("⚠️ שגיאת תקשורת עם שרת האימות. אנא ודא חיבור לרשת.", "#ef4444")
+                    ])
+                    return
+
+                if not auth_result:
                     teacher_name = self.loan_data.get("teacher_name") or self.loan_data.get("student_name", "מורה")
                     self.screen.root.after(0, lambda: [
                         self.screen.set_verifying(False),
@@ -287,9 +345,16 @@ class CartAgent:
 
             # 5. השאלת תלמיד - וידוא התאמה מול מזהה ההשאלה הקיים של התלמיד
             loan_id = str(self.loan_data.get("loan_id", ""))
-            is_authenticated = db.verify_loan_auth(loan_id, entered) if loan_id else False
+            auth_result = db.verify_loan_auth(loan_id, entered) if loan_id else False
 
-            if not is_authenticated:
+            if auth_result == "OFFLINE":
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.show_status("⚠️ שגיאת תקשורת עם שרת האימות. אנא ודא חיבור לרשת.", "#ef4444")
+                ])
+                return
+
+            if not auth_result:
                 name = self.loan_data.get("student_name", "")
                 self.screen.root.after(0, lambda: [
                     self.screen.set_verifying(False),
@@ -436,7 +501,7 @@ class CartAgent:
         try:
             lesson = db.get_active_lesson_by_code(code)
             if not lesson:
-                if not is_connected():
+                if not is_connected(self):
                     self.screen.root.after(0, lambda: [
                         self.screen.set_verifying(False),
                         self.screen.show_status("שגיאה בתקשורת עם השרת. נסה שוב.", "#ef4444")
@@ -868,7 +933,7 @@ class CartAgent:
         else:
             # If screen is locked and network status is offline, show warning; else clear warning
             if not self._unlocked and self.screen:
-                if not is_connected():
+                if not is_connected(self):
                     self.screen.show_status("⚠️ מחשב זה מנותק מהאינטרנט. אנא חבר ל-Wi-Fi או הזן קוד מנהל.", "#ef4444")
                 else:
                     self.screen.show_status("")
@@ -1051,7 +1116,7 @@ class CartAgent:
         last = None
         while self._running:
             try:
-                connected = is_connected()
+                connected = is_connected(self)
                 if connected != last:
                     last = connected
                     log.info(f"Wi-Fi: {'on' if connected else 'off'}")
@@ -1061,11 +1126,14 @@ class CartAgent:
                             self._rt_loan.trigger_reconnect()
                         if self._rt_lesson:
                             self._rt_lesson.trigger_reconnect()
-                if self.screen:
+                if self.screen and not self._unlocked:
                     self.screen.update_wifi_status(connected)
             except Exception as e:
                 log.error(f"Wi-Fi: {e}")
-            time.sleep(3)
+            
+            # Sleep 30s when unlocked (idle in background), 3s when locked (active user screen)
+            sleep_time = 30 if self._unlocked else 3
+            time.sleep(sleep_time)
 
     # ── Watchdog Monitor ──────────────────────────────────────
 

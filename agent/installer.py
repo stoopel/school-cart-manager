@@ -435,7 +435,7 @@ class InstallerGUI:
                         subkey = winreg.OpenKey(profile_key, subkey_name)
                         try:
                             val, _ = winreg.QueryValueEx(subkey, "ProfileImagePath")
-                            if val.split("\\")[-1] == logged_user:
+                            if val.split("\\")[-1].lower() == logged_user.lower():
                                 user_sid = subkey_name
                                 winreg.CloseKey(subkey)
                                 break
@@ -626,7 +626,7 @@ class InstallerGUI:
                         subkey = winreg.OpenKey(profile_key, subkey_name)
                         try:
                             val, _ = winreg.QueryValueEx(subkey, "ProfileImagePath")
-                            if val.split("\\")[-1] == logged_user:
+                            if val.split("\\")[-1].lower() == logged_user.lower():
                                 user_sid = subkey_name
                                 winreg.CloseKey(subkey)
                                 break

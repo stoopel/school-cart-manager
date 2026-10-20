@@ -445,11 +445,18 @@ class RealtimeSubscription:
 
 def verify_loan_auth(loan_id: str, entered_id: str):
     """Verifies student/teacher ID for loan via secure serverless endpoint.
-    Returns: True if valid, False if wrong ID, 'OFFLINE' if network error"""
+    Returns:
+        True: valid match
+        False: invalid match (wrong ID)
+        'LOAN_NOT_FOUND': loan is no longer active in database
+        'OFFLINE': network error
+    """
     try:
         res = _api_post("verify_loan_auth", {"loanId": loan_id, "enteredId": entered_id})
         if res is None:
             return "OFFLINE"
+        if res.get("loanNotFound"):
+            return "LOAN_NOT_FOUND"
         return bool(res.get("isValid"))
     except Exception as e:
         log.error(f"verify_loan_auth error: {e}")

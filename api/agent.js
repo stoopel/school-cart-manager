@@ -322,6 +322,11 @@ export default async function handler(req, res) {
         const { data: lessonData } = await supabaseAdmin.from('lessons').select('id, end_time, status, teachers(name)').eq('id', lessonId).maybeSingle()
         if (!lessonData || lessonData.status !== 'active') return res.status(400).json({ error: 'Lesson is not active' })
 
+        // Clean up any previous active lesson participation for this device
+        if (deviceId) {
+          await supabaseAdmin.from('lesson_participants').delete().eq('device_id', deviceId).neq('lesson_id', lessonId)
+        }
+
         await supabaseAdmin.from('lesson_participants').upsert({ lesson_id: lessonId, student_id: studentId, loan_id: loanId, device_id: deviceId }, { onConflict: 'lesson_id, device_id' })
         await supabaseAdmin.from('device_loans').update({ lesson_id: lessonId }).eq('id', loanId)
         const formattedLesson = {
@@ -481,7 +486,7 @@ export default async function handler(req, res) {
         .eq('status', 'active')
         .maybeSingle()
 
-      if (error || !loan) return res.status(404).json({ error: 'Active loan not found' })
+      if (error || !loan) return res.status(200).json({ isValid: false, loanNotFound: true, error: 'Active loan not found' })
 
       const enteredHash = normalizeAndHashId(enteredId)
       const s = Array.isArray(loan.students) ? loan.students[0] : loan.students;

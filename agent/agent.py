@@ -304,6 +304,17 @@ class CartAgent:
                     ])
                     return
 
+                if auth_result == "LOAN_NOT_FOUND":
+                    log.warning("Teacher loan not found on server during verification. Resetting PC to unborrowed state.")
+                    self.loan_data = None
+                    self._lesson_data = None
+                    self.screen.root.after(0, lambda: [
+                        self.screen.set_verifying(False),
+                        self.screen.set_loan_info(None),
+                        self.screen.relock("המחשב אינו מושאל כעת. השאל אותו תחילה בעמדת העגלה.")
+                    ])
+                    return
+
                 if not auth_result:
                     teacher_name = self.loan_data.get("teacher_name") or self.loan_data.get("student_name", "מורה")
                     self.screen.root.after(0, lambda: [
@@ -352,6 +363,17 @@ class CartAgent:
                 self.screen.root.after(0, lambda: [
                     self.screen.set_verifying(False),
                     self.screen.show_status("⚠️ שגיאת תקשורת עם שרת האימות. אנא ודא חיבור לרשת.", "#ef4444")
+                ])
+                return
+
+            if auth_result == "LOAN_NOT_FOUND":
+                log.warning("Student loan not found on server during verification. Resetting PC to unborrowed state.")
+                self.loan_data = None
+                self._lesson_data = None
+                self.screen.root.after(0, lambda: [
+                    self.screen.set_verifying(False),
+                    self.screen.set_loan_info(None),
+                    self.screen.relock("המחשב אינו מושאל כעת. השאל אותו תחילה בעמדת העגלה.")
                 ])
                 return
 

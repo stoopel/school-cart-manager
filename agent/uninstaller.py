@@ -236,7 +236,7 @@ class UninstallerGUI:
                         subkey = winreg.OpenKey(profile_key, subkey_name)
                         try:
                             val, _ = winreg.QueryValueEx(subkey, "ProfileImagePath")
-                            if val.split("\\")[-1] == logged_user:
+                            if val.split("\\")[-1].lower() == logged_user.lower():
                                 user_sid = subkey_name
                                 winreg.CloseKey(subkey)
                                 break
@@ -275,16 +275,17 @@ class UninstallerGUI:
             self.log("[*] Driver uninstaller executable not found. Skipping.")
 
     def trigger_folder_deletion(self):
-        # Directly launch cmd.exe to wait for process exit and remove directory cleanly
-        cmd_str = r'cmd.exe /c "timeout /t 2 /nobreak >nul & rmdir /s /q \"C:\Program Files\CartAgent\""'
+        # Show success message first while UI is active and before process termination
+        messagebox.showinfo("הסרת התוכנה", "תוכנת CartAgent הוסרה בהצלחה מהמחשב!\nיש לבצע הפעלה מחדש (Reboot) למחשב להשלמת הסרת הדרייבר.")
+
+        # Directly launch cmd.exe to wait for process exit (via ping) and remove directory cleanly
+        cmd_str = 'cmd.exe /c ping 127.0.0.1 -n 3 >nul & rmdir /s /q "C:\\Program Files\\CartAgent"'
         try:
             subprocess.Popen(cmd_str, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
             self.log("[OK] Triggered final folder deletion.")
         except Exception as e:
             self.log(f"[WARNING] Failed to trigger folder deletion: {e}")
 
-        # Show success message
-        messagebox.showinfo("הסרת התוכנה", "תוכנת CartAgent הוסרה בהצלחה מהמחשב!\nיש לבצע הפעלה מחדש (Reboot) למחשב להשלמת הסרת הדרייבר.")
         self.root.destroy()
         sys.exit(0)
 

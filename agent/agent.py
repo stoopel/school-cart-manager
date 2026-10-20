@@ -185,6 +185,7 @@ class CartAgent:
         self._running        = True
         self._unlocked       = False
         self._frozen         = False
+        self._last_disconnected_lesson_id = None
         self._lesson_data    = None   # שיעור פעיל נוכחי
         self._lesson_timer   = None   # LessonTimer
         self._rt_loan        = None   # Realtime: השאלה
@@ -370,28 +371,33 @@ class CartAgent:
             self._admin_bypass = False
 
             # מניעת לולאת נעילה בעקבות ריבוט / נעילה (Reboot/Lock loop bypass)
-            # אם התלמיד כבר רשום לשיעור פעיל כלשהו במסד הנתונים כחלק מההשאלה שלו, נבצע מעקף פתיחה ישיר
-            current_db_loan = db.get_active_loan(ASSET_TAG)
-            if current_db_loan and current_db_loan.get("lesson_id"):
-                lesson_id = current_db_loan["lesson_id"]
-                active_lesson = db.get_active_lesson_by_id(lesson_id)
-                if active_lesson:
-                    log.info(f"Student already joined to active lesson {lesson_id} (Reboot loop bypass). Unlocking directly.")
-                    self._lesson_data = active_lesson
-                    self._lesson_timer = LessonTimer(
-                        active_lesson["end_time"],
-                        server_now_str=active_lesson.get("server_now")
-                    )
-                    self._start_lesson_realtime(lesson_id)
-                    db.log_digital_login(self.loan_data["loan_id"], self.loan_data["device_id"])
-                    self.screen.root.after(0, lambda: [
-                        self.screen.set_verifying(False),
-                        self._do_unlock(self.loan_data["student_name"])
-                    ])
-                    return
-
+            # בדיקת שיעורים פעילים עבור התלמיד (Pre-assigned ושיעורים פעילים לחיבור חוזר)
             student_id = self.loan_data.get("student_id") if self.loan_data else None
             pre_assigned = db.check_pre_assigned_lessons(student_id) if student_id else []
+            if pre_assigned is None:
+                pre_assigned = []
+
+            # אם קיים שיעור פעיל שמקושר להשאלה או שיעור שהתלמיד התנתק ממנו יזום - נוסיף אותו כאפשרות בחירה
+            candidate_lesson_ids = []
+            current_db_loan = db.get_active_loan(ASSET_TAG)
+            if current_db_loan and current_db_loan.get("lesson_id"):
+                candidate_lesson_ids.append(current_db_loan["lesson_id"])
+            if hasattr(self, '_last_disconnected_lesson_id') and self._last_disconnected_lesson_id:
+                if self._last_disconnected_lesson_id not in candidate_lesson_ids:
+                    candidate_lesson_ids.append(self._last_disconnected_lesson_id)
+
+            for cand_id in candidate_lesson_ids:
+                active_cand = db.get_active_lesson_by_id(cand_id)
+                if active_cand:
+                    found = False
+                    for l in pre_assigned:
+                        if l.get("lesson_id") == cand_id:
+                            l["is_reconnect"] = True
+                            found = True
+                            break
+                    if not found:
+                        active_cand["is_reconnect"] = True
+                        pre_assigned.insert(0, active_cand)
 
             warn_msg = None
             warn_color = None
@@ -572,6 +578,8 @@ class CartAgent:
     def _on_student_disconnect(self):
         log.info("Student requested disconnection from lesson via floating widget.")
         prev_lesson = dict(self._lesson_data) if self._lesson_data else None
+        if prev_lesson and prev_lesson.get("lesson_id"):
+            self._last_disconnected_lesson_id = prev_lesson["lesson_id"]
         self._unlocked = False
         self._lesson_data = None
         self._lesson_timer = None

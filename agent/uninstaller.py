@@ -200,13 +200,9 @@ class UninstallerGUI:
         self.log("[*] Uninstalling Interception driver (Kernel)...")
         self.uninstall_driver()
 
-        # 6. Re-enable Task Manager
-        self.log("[*] Re-enabling Task Manager...")
-        self.re_enable_task_mgr()
-
         self.log("[OK] Uninstallation complete.")
         
-        # 7. Create cleanup batch file and exit
+        # 6. Trigger folder cleanup and exit
         self.trigger_folder_deletion()
 
     def restore_registry_shell(self):
@@ -278,37 +274,17 @@ class UninstallerGUI:
         else:
             self.log("[*] Driver uninstaller executable not found. Skipping.")
 
-    def re_enable_task_mgr(self):
-        try:
-            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System")
-            winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 0)
-            winreg.CloseKey(key)
-            self.log("[OK] Re-enabled Task Manager access.")
-        except Exception:
-            pass
-
     def trigger_folder_deletion(self):
-        # Create a self-deleting cleanup batch file in %TEMP%
-        temp_dir = os.environ.get("TEMP", "C:\\Windows\\Temp")
-        batch_path = os.path.join(temp_dir, "cartagent_cleanup.bat")
-        
-        batch_content = f"""@echo off
-timeout /t 2 > nul
-rmdir /s /q "C:\\Program Files\\CartAgent"
-del "%~f0"
-"""
+        # Directly launch cmd.exe to wait for process exit and remove directory cleanly
+        cmd_str = r'cmd.exe /c "timeout /t 2 /nobreak >nul & rmdir /s /q \"C:\Program Files\CartAgent\""'
         try:
-            with open(batch_path, "w") as f:
-                f.write(batch_content)
-            
-            # Start the batch file in a new window/process
-            subprocess.Popen([batch_path], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.Popen(cmd_str, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
             self.log("[OK] Triggered final folder deletion.")
         except Exception as e:
-            self.log(f"[WARNING] Failed to write cleanup batch file: {e}")
+            self.log(f"[WARNING] Failed to trigger folder deletion: {e}")
 
         # Show success message
-        messagebox.showinfo("הסרה הושלמה", "תוכנת CartAgent הוסרה בהצלחה מהמחשב!\nמומלץ לבצע הפעלה מחדש (Reboot) של המחשב להשלמת הסרת הדרייבר.")
+        messagebox.showinfo("הסרת התוכנה", "תוכנת CartAgent הוסרה בהצלחה מהמחשב!\nיש לבצע הפעלה מחדש (Reboot) למחשב להשלמת הסרת הדרייבר.")
         self.root.destroy()
         sys.exit(0)
 

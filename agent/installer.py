@@ -310,6 +310,17 @@ class InstallerGUI:
                 os.makedirs(local_dir, exist_ok=True)
             self.log(f"[OK] Directory created: {local_dir}")
 
+            # Configure Windows Defender exclusion for deployment directory
+            try:
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                     f"Add-MpPreference -ExclusionPath '{local_dir}' -ErrorAction SilentlyContinue"],
+                    capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                self.log("[OK] Configured Windows Defender folder security exclusion.")
+            except Exception as ex:
+                self.log(f"[WARNING] Could not set Defender exclusion: {ex}")
+
             # 3. Create local config.json
             self.log("[*] Deploying configuration config.json...")
             self.config_template["asset_tag"] = self.asset_tag

@@ -14,22 +14,23 @@ python -m pip install pyinstaller requests
 # 1. Build cart_agent.exe
 Write-Host ""
 Write-Host "[*] 1/4 Compiling cart_agent.exe..." -ForegroundColor Cyan
-python -m PyInstaller --clean --onefile --windowed --name cart_agent --collect-all charset_normalizer --add-data "config.json;." --add-data "interception.dll;." agent.py
+python -m PyInstaller --clean --onefile --windowed --name cart_agent --version-file version_info_agent.txt --collect-all charset_normalizer --add-data "config.json;." --add-data "interception.dll;." agent.py
 
 # 2. Build cart_watchdog.exe
 Write-Host ""
 Write-Host "[*] 2/4 Compiling cart_watchdog.exe..." -ForegroundColor Cyan
-python -m PyInstaller --clean --onefile --windowed --name cart_watchdog watchdog.py
+python -m PyInstaller --clean --onefile --windowed --name cart_watchdog --version-file version_info_watchdog.txt watchdog.py
 
 # 3. Build uninstaller.exe
 Write-Host ""
 Write-Host "[*] 3/4 Compiling uninstaller.exe..." -ForegroundColor Cyan
-python -m PyInstaller --clean --onefile --windowed --uac-admin --name uninstaller uninstaller.py
+python -m PyInstaller --clean --onefile --windowed --uac-admin --name uninstaller --version-file version_info_uninstaller.txt uninstaller.py
 
 # 4. Build setup_agent.exe (Self-contained Enterprise Installer)
 Write-Host ""
 Write-Host "[*] 4/4 Compiling setup_agent.exe (Self-contained Installer)..." -ForegroundColor Cyan
 python -m PyInstaller --clean --onefile --windowed --uac-admin --name setup_agent `
+  --version-file "version_info_setup.txt" `
   --add-data "config.json;." `
   --add-data "interception.dll;." `
   --add-data "install-interception.exe;." `

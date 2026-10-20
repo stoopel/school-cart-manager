@@ -985,12 +985,26 @@ class TeacherWidget(tk.Toplevel):
         code = lesson.get("lesson_code", "")
         subject = lesson.get("subject", "שיעור")
         parts = lesson.get("lesson_participants", [])
-        part_count = len(parts) if isinstance(parts, list) else 0
+        part_count = 0
+        now_utc = datetime.now(timezone.utc)
+        if isinstance(parts, list):
+            for p in parts:
+                dev = p.get("devices") or {}
+                ls = dev.get("last_seen")
+                if ls:
+                    try:
+                        ls_dt = datetime.fromisoformat(str(ls).replace("Z", "+00:00"))
+                        if (now_utc - ls_dt).total_seconds() <= 120:
+                            part_count += 1
+                        continue
+                    except Exception:
+                        pass
+                part_count += 1
         is_locked = lesson.get("is_locked", False)
         
         # Full frame active lesson
         self.lbl_lesson_info.config(text=f"📚 {subject}  |  🔢 קוד: {code}", fg="#a5b4fc")
-        self.lbl_students_count.config(text=f"👥 {part_count} תלמידים מחוברים 💻", fg=TEXT_MAIN)
+        self.lbl_students_count.config(text=f"👥 {part_count} תלמידים בשיעור", fg=TEXT_MAIN)
         
         if is_locked:
             self.btn_freeze.config(text="▶️ שחרר מסכים", bg=SUCCESS, activebackground="#16a34a")

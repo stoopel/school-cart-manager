@@ -43,10 +43,10 @@ function quickTimes() {
 }
 
 // ── Lesson Card ────────────────────────────────────────────────
-function LessonCard({ lesson, teacher, now, onRefresh }) {
+function LessonCard({ lesson, teacher, now, onRefresh, allStudents = [] }) {
   const [busy, setBusy] = useState(false)
   const [showAssignModal, setShowAssignModal] = useState(false)
-  const [preAssigned, setPreAssigned] = useState([])
+  const [studentsList, setStudentsList] = useState([])
 
   const isScheduled = lesson.status === 'scheduled'
   const startTs = new Date(lesson.start_time).getTime()
@@ -63,25 +63,91 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
   }, [isScheduled, secUntilStart, onRefresh, lesson.id])
 
   const loadAssignments = useCallback(async () => {
+    // 1. Fetch pre-assigned student IDs
     const { data: lpa } = await supabase
       .from('lesson_pre_assignments')
-      .select('student_id, students(name, class_name)')
-      .eq('lesson_id', lesson.id)
-
-    const { data: lp } = await supabase
-      .from('lesson_participants')
       .select('student_id')
       .eq('lesson_id', lesson.id)
 
-    const participantSet = new Set(lp?.map(p => p.student_id) ?? [])
-    
-    setPreAssigned((lpa ?? []).map(item => ({
-      student_id: item.student_id,
-      name: item.students?.name ?? 'תלמיד',
-      class_name: item.students?.class_name ?? '',
-      isPresent: participantSet.has(item.student_id)
-    })))
-  }, [lesson.id])
+    // 2. Fetch active lesson participants with their devices
+    const { data: lp } = await supabase
+      .from('lesson_participants')
+      .select('student_id, device_id, devices(device_number, last_seen)')
+      .eq('lesson_id', lesson.id)
+
+    // Build or fetch students map
+    let sMap = new Map((allStudents || []).map(s => [s.id, s]))
+    if (sMap.size === 0) {
+      try {
+        const { data: stus } = await supabase.rpc('get_teacher_student_list')
+        if (stus) {
+          sMap = new Map(stus.map(s => [s.id, s]))
+        }
+      } catch (e) {
+        // Fallback gracefully
+      }
+    }
+
+    const nowTime = Date.now()
+    const participantMap = new Map()
+    for (const p of (lp ?? [])) {
+      if (p.student_id) {
+        participantMap.set(p.student_id, p)
+      }
+    }
+
+    const unified = []
+    const seenStudentIds = new Set()
+
+    // Process pre-assigned students first
+    for (const item of (lpa ?? [])) {
+      seenStudentIds.add(item.student_id)
+      const part = participantMap.get(item.student_id)
+      const stuInfo = sMap.get(item.student_id)
+      let status = 'not_joined'
+      let deviceNumber = null
+
+      if (part) {
+        deviceNumber = part.devices?.device_number
+        const ls = part.devices?.last_seen ? new Date(part.devices.last_seen).getTime() : 0
+        const isOnline = (nowTime - ls) <= 120000 // 2-minute heartbeat liveness window
+        status = isOnline ? 'online' : 'offline'
+      }
+
+      unified.push({
+        student_id: item.student_id,
+        name: stuInfo?.name ?? 'תלמיד',
+        class_name: stuInfo?.class_name ?? '',
+        status,
+        isPreAssigned: true,
+        isGuest: false,
+        deviceNumber
+      })
+    }
+
+    // Process guest students who joined via 4-digit lesson code
+    for (const p of (lp ?? [])) {
+      if (p.student_id && !seenStudentIds.has(p.student_id)) {
+        seenStudentIds.add(p.student_id)
+        const stuInfo = sMap.get(p.student_id)
+        const ls = p.devices?.last_seen ? new Date(p.devices.last_seen).getTime() : 0
+        const isOnline = (nowTime - ls) <= 120000
+        const status = isOnline ? 'online' : 'offline'
+
+        unified.push({
+          student_id: p.student_id,
+          name: stuInfo?.name ?? 'תלמיד',
+          class_name: stuInfo?.class_name ?? '',
+          status,
+          isPreAssigned: false,
+          isGuest: true,
+          deviceNumber: p.devices?.device_number
+        })
+      }
+    }
+
+    setStudentsList(unified)
+  }, [lesson.id, allStudents])
 
   useEffect(() => {
     loadAssignments()
@@ -179,11 +245,34 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
           )}
         </div>
 
-        {/* Connections Info */}
-        <div className="flex items-center gap-1.5 text-xs text-on-surface font-body py-2 border-y border-gray-100">
-          <span className="material-symbols-outlined text-sm text-gray-400">groups</span>
-          <span>{lesson.participant_count ?? 0} מחשבים מחוברים</span>
-        </div>
+        {/* Unified Students Connection Info */}
+        {(() => {
+          const onlineCount = studentsList.filter(s => s.status === 'online').length
+          const offlineCount = studentsList.filter(s => s.status === 'offline').length
+          const totalEnrolled = studentsList.length
+
+          return (
+            <div className="flex items-center justify-between text-xs text-on-surface font-body py-2 border-y border-gray-100">
+              <div className="flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-sm text-primary">groups</span>
+                <span className="font-semibold text-gray-800">
+                  {onlineCount} תלמידים בשיעור כעת
+                </span>
+                {totalEnrolled > 0 && (
+                  <span className="text-gray-400 text-[11px]">
+                    (מתוך {totalEnrolled} רשומים)
+                  </span>
+                )}
+              </div>
+              {offlineCount > 0 && (
+                <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-full font-body flex items-center gap-1" title="מחשבים שהיו בשיעור אך לא שידרו אות חיים ב-2 הדקות האחרונות">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                  {offlineCount} לא זמינים
+                </span>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Buttons */}
         {!isScheduled ? (
@@ -251,22 +340,77 @@ function LessonCard({ lesson, teacher, now, onRefresh }) {
         </button>
       </div>
 
-      {/* Live Attendance Panel inside Card */}
-      {preAssigned.length > 0 && (
-        <div className="mt-6 pt-5 border-t border-gray-100 space-y-4">
+      {/* Unified Live Attendance Panel inside Card */}
+      {studentsList.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-gray-100 space-y-3">
           <div className="flex justify-between items-center">
-            <h2 className="font-headline font-semibold text-on-surface text-sm">נוכחות דיגיטלית חיה</h2>
-            <span className="text-[10px] bg-primary/5 text-primary border border-primary/20 px-2 py-0.5 rounded-lg font-body">
-              {preAssigned.filter(p => p.isPresent).length} / {preAssigned.length} נוכחים
-            </span>
+            <h2 className="font-headline font-semibold text-on-surface text-sm flex items-center gap-1.5">
+              <span>נוכחות תלמידים בשיעור</span>
+            </h2>
+            <div className="flex items-center gap-1.5 text-[10px] font-body">
+              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2 py-0.5 rounded-md font-medium">
+                {studentsList.filter(s => s.status === 'online').length} פעילים
+              </span>
+              {studentsList.some(s => s.status === 'offline') && (
+                <span className="bg-amber-50 text-amber-700 border border-amber-200/60 px-2 py-0.5 rounded-md font-medium">
+                  {studentsList.filter(s => s.status === 'offline').length} לא זמינים
+                </span>
+              )}
+              {studentsList.some(s => s.status === 'not_joined') && (
+                <span className="bg-gray-50 text-gray-500 border border-gray-200 px-2 py-0.5 rounded-md">
+                  {studentsList.filter(s => s.status === 'not_joined').length} טרם התחברו
+                </span>
+              )}
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 max-h-[155px] overflow-y-auto custom-scrollbar pr-1">
-            {preAssigned.map(p => (
-              <div key={p.student_id} className={`bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between transition-all ${p.isPresent ? 'opacity-100' : 'opacity-50'}`}>
-                <span className="text-xs font-body text-on-surface truncate max-w-[80%]" title={p.name}>{p.name}</span>
-                <span className={`w-2 h-2 rounded-full ${p.isPresent ? 'bg-green-500' : 'bg-red-400'}`}></span>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto custom-scrollbar pr-1">
+            {studentsList.map(s => {
+              const isOnline = s.status === 'online'
+              const isOffline = s.status === 'offline'
+              
+              let dotBg = 'bg-gray-300'
+              let dotTitle = 'טרם התחבר'
+              if (isOnline) { 
+                dotBg = 'bg-emerald-500 shadow-sm shadow-emerald-200' 
+                dotTitle = 'מחובר ופעיל כעת' 
+              } else if (isOffline) { 
+                dotBg = 'bg-amber-400 shadow-sm shadow-amber-200' 
+                dotTitle = 'מחשב כבוי / נותק מעל 2 דק\'' 
+              }
+
+              return (
+                <div
+                  key={s.student_id}
+                  className={`bg-white border rounded-lg p-2.5 flex items-center justify-between transition-all ${
+                    isOnline
+                      ? 'border-emerald-200/80 bg-emerald-50/20 shadow-xs'
+                      : isOffline
+                      ? 'border-amber-200/60 bg-amber-50/10 opacity-80'
+                      : 'border-gray-200 opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0 max-w-[82%]">
+                    <span className="text-xs font-body text-on-surface font-medium truncate" title={s.name}>
+                      {s.name}
+                    </span>
+                    {s.deviceNumber && (
+                      <span className="text-[10px] text-gray-400 shrink-0 font-body" title={`מחשב נייד #${s.deviceNumber}`}>
+                        #{s.deviceNumber}
+                      </span>
+                    )}
+                    {s.isGuest && (
+                      <span className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200/60 px-1 rounded shrink-0 font-body" title="הצטרף באמצעות קוד השיעור">
+                        קוד
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotBg}`}
+                    title={dotTitle}
+                  />
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -1257,7 +1401,7 @@ function TeacherDashboard({ teacher, onLogout }) {
                     </div>
                     <div className="space-y-4">
                       {active.map(l => (
-                        <LessonCard key={l.id} lesson={l} teacher={teacher} now={now} onRefresh={load} />
+                        <LessonCard key={l.id} lesson={l} teacher={teacher} now={now} onRefresh={load} allStudents={students} />
                       ))}
                     </div>
                   </div>
@@ -1271,7 +1415,7 @@ function TeacherDashboard({ teacher, onLogout }) {
                     </div>
                     <div className="space-y-4">
                       {scheduled.map(l => (
-                        <LessonCard key={l.id} lesson={l} teacher={teacher} now={now} onRefresh={load} />
+                        <LessonCard key={l.id} lesson={l} teacher={teacher} now={now} onRefresh={load} allStudents={students} />
                       ))}
                     </div>
                   </div>

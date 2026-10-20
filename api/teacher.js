@@ -50,7 +50,7 @@ export default async function handler(req, res) {
     if (action === 'list') {
       const { data, error } = await supabaseAdmin
         .from('lessons')
-        .select('*, lesson_participants(id, student_id, loan_id, device_id, students(name, class_name), devices(device_number))')
+        .select('*, lesson_participants(id, student_id, loan_id, device_id, students(name, class_name), devices(device_number, last_seen))')
         .eq('teacher_id', teacherId)
         .order('created_at', { ascending: false })
         .limit(30)

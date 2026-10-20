@@ -514,11 +514,12 @@ SELECT l.id,
     l.is_locked,
     t.name AS teacher_name,
     (EXTRACT(epoch FROM (l.end_time - now())) / (60)::numeric) AS minutes_remaining,
-    count(lp.id) AS participant_count
-   FROM ((lessons l
-     LEFT JOIN teachers t ON ((t.id = l.teacher_id)))
-     LEFT JOIN lesson_participants lp ON ((lp.lesson_id = l.id)))
-  WHERE ((l.status = 'active'::text) AND (l.end_time > now()))
+    COUNT(CASE WHEN d.last_seen > (NOW() - INTERVAL '2 minutes') THEN 1 END) AS participant_count
+   FROM lessons l
+     LEFT JOIN teachers t ON t.id = l.teacher_id
+     LEFT JOIN lesson_participants lp ON lp.lesson_id = l.id
+     LEFT JOIN devices d ON d.id = lp.device_id
+  WHERE l.status = 'active' AND l.end_time > now()
   GROUP BY l.id, t.name;
 
 CREATE OR REPLACE VIEW public.cart_status AS
@@ -765,22 +766,38 @@ $function$;
 CREATE OR REPLACE FUNCTION public.handle_returned_laptop_disconnect()
  RETURNS trigger
  LANGUAGE plpgsql
-AS $function$
-BEGIN
-    -- If the device loan status changes to 'returned' (checked-in)
-    IF NEW.status IN ('returned', 'force_closed') AND OLD.status = 'active' THEN
-        -- Set digital_logout_at to checkin_at if not already set
-        IF NEW.digital_logout_at IS NULL THEN
-            NEW.digital_logout_at := NEW.checkin_at;
-        END IF;
-        
-        -- Remove from lesson_participants for any active lesson
-        DELETE FROM public.lesson_participants
-        WHERE device_id = NEW.device_id
-          AND lesson_id IN (SELECT id FROM public.lessons WHERE status = 'active');
-    END IF;
-    RETURN NEW;
-END;
+AS $function$
+
+BEGIN
+
+    -- If the device loan status changes to 'returned' (checked-in)
+
+    IF NEW.status IN ('returned', 'force_closed') AND OLD.status = 'active' THEN
+
+        -- Set digital_logout_at to checkin_at if not already set
+
+        IF NEW.digital_logout_at IS NULL THEN
+
+            NEW.digital_logout_at := NEW.checkin_at;
+
+        END IF;
+
+        
+
+        -- Remove from lesson_participants for any active lesson
+
+        DELETE FROM public.lesson_participants
+
+        WHERE device_id = NEW.device_id
+
+          AND lesson_id IN (SELECT id FROM public.lessons WHERE status = 'active');
+
+    END IF;
+
+    RETURN NEW;
+
+END;
+
 $function$;
 
 -- RPC: hash_id
@@ -1064,46 +1081,86 @@ $function$;
 CREATE OR REPLACE FUNCTION public.sync_cart_total_devices()
  RETURNS trigger
  LANGUAGE plpgsql
-AS $function$
-BEGIN
-  IF TG_OP = 'DELETE' THEN
-    IF OLD.cart_id IS NOT NULL THEN
-      UPDATE public.carts
-      SET total_devices = (
-        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = OLD.cart_id AND deleted_at IS NULL
-      )
-      WHERE id = OLD.cart_id;
-    END IF;
-    RETURN OLD;
-  ELSIF TG_OP = 'UPDATE' THEN
-    -- אם המחשב הועבר בין עגלות, נסנכרן גם את העגלה הקודמת
-    IF OLD.cart_id IS DISTINCT FROM NEW.cart_id AND OLD.cart_id IS NOT NULL THEN
-      UPDATE public.carts
-      SET total_devices = (
-        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = OLD.cart_id AND deleted_at IS NULL
-      )
-      WHERE id = OLD.cart_id;
-    END IF;
-
-    IF NEW.cart_id IS NOT NULL THEN
-      UPDATE public.carts
-      SET total_devices = (
-        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = NEW.cart_id AND deleted_at IS NULL
-      )
-      WHERE id = NEW.cart_id;
-    END IF;
-    RETURN NEW;
-  ELSE -- INSERT
-    IF NEW.cart_id IS NOT NULL THEN
-      UPDATE public.carts
-      SET total_devices = (
-        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = NEW.cart_id AND deleted_at IS NULL
-      )
-      WHERE id = NEW.cart_id;
-    END IF;
-    RETURN NEW;
-  END IF;
-END;
+AS $function$
+
+BEGIN
+
+  IF TG_OP = 'DELETE' THEN
+
+    IF OLD.cart_id IS NOT NULL THEN
+
+      UPDATE public.carts
+
+      SET total_devices = (
+
+        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = OLD.cart_id AND deleted_at IS NULL
+
+      )
+
+      WHERE id = OLD.cart_id;
+
+    END IF;
+
+    RETURN OLD;
+
+  ELSIF TG_OP = 'UPDATE' THEN
+
+    -- אם המחשב הועבר בין עגלות, נסנכרן גם את העגלה הקודמת
+
+    IF OLD.cart_id IS DISTINCT FROM NEW.cart_id AND OLD.cart_id IS NOT NULL THEN
+
+      UPDATE public.carts
+
+      SET total_devices = (
+
+        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = OLD.cart_id AND deleted_at IS NULL
+
+      )
+
+      WHERE id = OLD.cart_id;
+
+    END IF;
+
+
+
+    IF NEW.cart_id IS NOT NULL THEN
+
+      UPDATE public.carts
+
+      SET total_devices = (
+
+        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = NEW.cart_id AND deleted_at IS NULL
+
+      )
+
+      WHERE id = NEW.cart_id;
+
+    END IF;
+
+    RETURN NEW;
+
+  ELSE -- INSERT
+
+    IF NEW.cart_id IS NOT NULL THEN
+
+      UPDATE public.carts
+
+      SET total_devices = (
+
+        SELECT COUNT(*)::INT FROM public.devices WHERE cart_id = NEW.cart_id AND deleted_at IS NULL
+
+      )
+
+      WHERE id = NEW.cart_id;
+
+    END IF;
+
+    RETURN NEW;
+
+  END IF;
+
+END;
+
 $function$;
 
 -- RPC: sync_pre_assignment_to_active_loan

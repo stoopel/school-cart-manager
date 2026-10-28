@@ -4,6 +4,7 @@ import Dashboard   from './pages/admin/Dashboard'
 import Students    from './pages/admin/Students'
 import Teachers    from './pages/admin/Teachers'
 import Lessons     from './pages/admin/Lessons'
+import Periods     from './pages/admin/Periods'
 import Carts       from './pages/admin/Carts'
 import Loans       from './pages/admin/Loans'
 import Labels      from './pages/admin/Labels'
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="students"  element={<Students />} />
           <Route path="teachers"  element={<Teachers />} />
           <Route path="lessons"   element={<Lessons />} />
+          <Route path="periods"   element={<Periods />} />
           <Route path="carts"     element={<Carts />} />
           <Route path="loans"     element={<Loans />} />
           <Route path="labels"    element={<Labels />} />

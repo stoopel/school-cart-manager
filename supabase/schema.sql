@@ -1365,3 +1365,27 @@ CREATE POLICY "students_admin" ON public.students FOR ALL TO authenticated USING
 
 DROP POLICY IF EXISTS "teachers_admin" ON public.teachers;
 CREATE POLICY "teachers_admin" ON public.teachers FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+
+-- ====================================================================
+-- Table: public.school_periods (School Bell Schedule)
+-- ====================================================================
+CREATE TABLE IF NOT EXISTS public.school_periods (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    period_number INT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.school_periods ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "school_periods_admin" ON public.school_periods;
+CREATE POLICY "school_periods_admin" ON public.school_periods FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "school_periods_select" ON public.school_periods;
+CREATE POLICY "school_periods_select" ON public.school_periods FOR SELECT TO anon USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_school_periods_number ON public.school_periods(period_number ASC);

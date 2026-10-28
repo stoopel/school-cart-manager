@@ -12,8 +12,9 @@ const NAV_MANAGE = [
 ]
 
 const NAV_CLASS = [
-  { label: 'שיעורים',  icon: '📚', to: '/admin/lessons' },
-  { label: 'מורים',    icon: '👩‍🏫', to: '/admin/teachers' },
+  { label: 'שיעורים',    icon: '📚', to: '/admin/lessons' },
+  { label: 'מערכת שעות', icon: '⏰', to: '/admin/periods' },
+  { label: 'מורים',      icon: '👩‍🏫', to: '/admin/teachers' },
 ]
 
 export default function AdminLayout() {

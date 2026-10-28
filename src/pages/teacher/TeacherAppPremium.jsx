@@ -218,6 +218,12 @@ function LessonCard({ lesson, teacher, now, onRefresh, allStudents = [] }) {
             <span className={`w-1.5 h-1.5 rounded-full ${isScheduled ? 'bg-blue-500' : 'bg-green-600'}`}></span>
             {isScheduled ? 'מתוכנן' : 'פעיל'}
           </span>
+          {lesson.cart_name && (
+            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border mt-1.5 font-body bg-purple-50 text-purple-700 border-purple-200 mr-1.5">
+              <span>🛒</span>
+              <span>{lesson.cart_name}</span>
+            </span>
+          )}
         </div>
         <div className="text-left">
           <div className="font-headline text-4xl font-bold text-on-surface tracking-tighter">
@@ -941,23 +947,160 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
 }
 
 // ── Open Lesson Form ───────────────────────────────────────────
-function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, existingLessons = [] }) {
+function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, existingLessons = [], prefillBooking = null }) {
   const DURATIONS = [30, 45, 60, 90]
-  const [subject,  setSubject]  = useState('')
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
+
+  const [subject, setSubject] = useState('')
   const [presetDuration, setPresetDuration] = useState(45)
   const [customDuration, setCustomDuration] = useState('')
   const [startMode, setStartMode] = useState(activeLesson ? 'scheduled' : 'now') // 'now' | 'scheduled'
+  const [lessonDate, setLessonDate] = useState(() => prefillBooking?.date || todayStr)
   const [startTime, setStartTime] = useState(() => {
+    if (prefillBooking?.period?.start_time) {
+      return prefillBooking.period.start_time.slice(0, 5)
+    }
     const d = new Date(); d.setMinutes(d.getMinutes() + 45, 0, 0)
     return d.toTimeString().slice(0, 5)
   })
+
+  // Carts & School Periods States
+  const [carts, setCarts] = useState([])
+  const [periods, setPeriods] = useState([])
+  const [loadingPrereqs, setLoadingPrereqs] = useState(true)
+  const [selectedCartId, setSelectedCartId] = useState(() => prefillBooking?.cart?.id || '')
+  const [selectedPeriodId, setSelectedPeriodId] = useState(() => prefillBooking?.period?.id || '')
+  const [cartConflict, setCartConflict] = useState(null)
+  const [checkingConflict, setCheckingConflict] = useState(false)
+
   const [saving, setSaving] = useState(false)
   const [newCode, setNewCode] = useState(null)
   const QUICK = quickTimes()
 
+  // Load active carts and school periods
+  useEffect(() => {
+    let isMounted = true
+    async function fetchPrereqs() {
+      try {
+        const [cartsRes, periodsRes] = await Promise.all([
+          supabase.from('carts').select('id, name, total_devices').is('deleted_at', null).order('name'),
+          supabase.from('school_periods').select('id, period_number, name, start_time, end_time, is_active').eq('is_active', true).order('period_number')
+        ])
+
+        if (!isMounted) return
+        setCarts(cartsRes.data || [])
+        setPeriods(periodsRes.data || [])
+
+        // If prefillBooking is active, apply period duration
+        if (prefillBooking?.period) {
+          const p = prefillBooking.period
+          const [sh, sm] = p.start_time.split(':').map(Number)
+          const [eh, em] = p.end_time.split(':').map(Number)
+          const diffMins = (eh * 60 + em) - (sh * 60 + sm)
+          if (diffMins > 0) {
+            setPresetDuration(diffMins)
+            setCustomDuration('')
+          }
+          setStartMode('scheduled')
+        }
+      } catch (err) {
+        console.error('Error fetching prereqs for OpenLessonForm:', err)
+      } finally {
+        if (isMounted) setLoadingPrereqs(false)
+      }
+    }
+    fetchPrereqs()
+    return () => { isMounted = false }
+  }, [prefillBooking])
+
+  // Handle Period selection change
+  function handlePeriodSelect(periodId) {
+    setSelectedPeriodId(periodId)
+    if (!periodId) return
+
+    const p = periods.find(item => item.id === periodId)
+    if (!p) return
+
+    setStartMode('scheduled')
+    setStartTime(p.start_time.slice(0, 5))
+
+    const [sh, sm] = p.start_time.split(':').map(Number)
+    const [eh, em] = p.end_time.split(':').map(Number)
+    const diffMins = (eh * 60 + em) - (sh * 60 + sm)
+    if (diffMins > 0) {
+      setPresetDuration(diffMins)
+      setCustomDuration('')
+    }
+  }
+
+  // Real-time Cart Conflict Checker
+  useEffect(() => {
+    if (!selectedCartId) {
+      setCartConflict(null)
+      return
+    }
+
+    let isMounted = true
+    async function checkConflict() {
+      setCheckingConflict(true)
+      try {
+        let startDt
+        const durationVal = customDuration ? Math.max(1, Number(customDuration) || 0) : presetDuration
+
+        if (startMode === 'now') {
+          startDt = new Date()
+        } else {
+          const [h, m] = startTime.split(':').map(Number)
+          startDt = new Date(`${lessonDate}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`)
+        }
+
+        const endDt = new Date(startDt.getTime() + durationVal * 60000)
+
+        const { data, error } = await supabase
+          .from('lessons')
+          .select('id, subject, lesson_code, start_time, end_time, teacher_id, teachers(name)')
+          .eq('cart_id', selectedCartId)
+          .in('status', ['active', 'scheduled'])
+          .lt('start_time', endDt.toISOString())
+          .gt('end_time', startDt.toISOString())
+
+        if (!isMounted) return
+        if (!error && data && data.length > 0) {
+          setCartConflict(data[0])
+        } else {
+          setCartConflict(null)
+        }
+      } catch (err) {
+        console.error('Conflict check error:', err)
+      } finally {
+        if (isMounted) setCheckingConflict(false)
+      }
+    }
+
+    const timer = setTimeout(checkConflict, 250)
+    return () => {
+      isMounted = false
+      clearTimeout(timer)
+    }
+  }, [selectedCartId, lessonDate, startTime, startMode, presetDuration, customDuration])
+
   async function submit(e) {
     e.preventDefault()
     setSaving(true)
+
+    // Gatekeeper validation
+    if (selectedCartId && periods.length === 0) {
+      alert('לא ניתן לשריין עגלה לפני שמערכת השעות (לוח צלצולים) הוגדרה במערכת ע"י מנהל.')
+      setSaving(false)
+      return
+    }
+
+    if (selectedCartId && cartConflict) {
+      const confTeacher = cartConflict.teachers?.name ? ` (המורה ${cartConflict.teachers.name})` : ''
+      alert(`לא ניתן לשריין עגלה זו: היא כבר תפוסה בשעות אלו לשיעור "${cartConflict.subject || 'שיעור'}"${confTeacher}.`)
+      setSaving(false)
+      return
+    }
 
     const { data: code, error: codeErr } = await supabase.rpc('generate_lesson_code')
     if (codeErr || !code) { alert('שגיאה בייצור קוד'); setSaving(false); return }
@@ -967,9 +1110,7 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
       startDt = new Date()
     } else {
       const [h, m] = startTime.split(':').map(Number)
-      startDt = new Date()
-      startDt.setHours(h, m, 0, 0)
-      if (startDt < new Date()) startDt.setDate(startDt.getDate() + 1)
+      startDt = new Date(`${lessonDate}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`)
     }
 
     const durationVal = customDuration ? Math.max(1, Number(customDuration) || 0) : presetDuration
@@ -993,7 +1134,7 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
         return
       }
 
-      // Check collision with any existing active or scheduled lesson
+      // Check collision with teacher's existing active or scheduled lessons
       const conflict = existingLessons.find(l => {
         const lStart = new Date(l.start_time).getTime()
         const lEnd = new Date(l.end_time).getTime()
@@ -1011,6 +1152,24 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
       }
     }
 
+    // Final double check against cart conflicts in DB
+    if (selectedCartId) {
+      const { data: dbConflicts } = await supabase
+        .from('lessons')
+        .select('id, subject, teachers(name)')
+        .eq('cart_id', selectedCartId)
+        .in('status', ['active', 'scheduled'])
+        .lt('start_time', endDt.toISOString())
+        .gt('end_time', startDt.toISOString())
+
+      if (dbConflicts && dbConflicts.length > 0) {
+        const confTeacher = dbConflicts[0].teachers?.name ? ` (המורה ${dbConflicts[0].teachers.name})` : ''
+        alert(`העגלה שנבחרה נתפסה זה עתה ע"י שיעור אחר${confTeacher}. אנא בחר עגלה אחרת או שנה את שעת השיעור.`)
+        setSaving(false)
+        return
+      }
+    }
+
     const { error } = await supabase.from('lessons').insert({
       teacher_id:       teacher.id,
       lesson_code:      code,
@@ -1019,6 +1178,7 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
       start_time:       startDt.toISOString(),
       end_time:         endDt.toISOString(),
       status,
+      cart_id:          selectedCartId || null,
     })
     setSaving(false)
     if (error) { alert('שגיאה: ' + error.message); return }
@@ -1026,26 +1186,37 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
     onCreated()
   }
 
-  if (newCode) return (
-    <div className="text-center py-6 space-y-4">
-      <div className="text-gray-500 text-xs font-semibold font-body">קוד השיעור שיוצר:</div>
-      <div className="font-headline text-5xl font-extrabold text-on-surface tracking-widest py-2">
-        {newCode}
+  if (newCode) {
+    const bookedCart = carts.find(c => c.id === selectedCartId)
+    return (
+      <div className="text-center py-6 space-y-4">
+        <div className="text-gray-500 text-xs font-semibold font-body">קוד השיעור שיוצר:</div>
+        <div className="font-headline text-5xl font-extrabold text-on-surface tracking-widest py-2">
+          {newCode}
+        </div>
+        {bookedCart && (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 border border-purple-200 text-purple-700 text-xs rounded-full font-body font-semibold">
+            <span>🛒</span>
+            <span>שוריינה: {bookedCart.name}</span>
+          </div>
+        )}
+        <div className="text-xs text-gray-500 font-body">
+          {startMode === 'now'
+            ? 'מסור קוד זה לתלמידים – השיעור פעיל עכשיו'
+            : `מסור קוד זה לתלמידים – יתחיל בתאריך ${lessonDate} בשעה ${startTime}`}
+        </div>
+        <button onClick={onCancel} className="w-full py-3.5 bg-primary rounded-lg font-bold text-white text-sm hover:opacity-90 transition-opacity font-headline">סגור חלונית</button>
       </div>
-      <div className="text-xs text-gray-500 font-body">
-        {startMode === 'now'
-          ? 'מסור קוד זה לתלמידים – השיעור פעיל עכשיו'
-          : `מסור קוד זה לתלמידים – יתחיל בשעה ${startTime}`}
-      </div>
-      <button onClick={onCancel} className="w-full py-3.5 bg-primary rounded-lg font-bold text-white text-sm hover:opacity-90 transition-opacity font-headline">סגור חלונית</button>
-    </div>
-  )
+    )
+  }
+
+  const hasPeriods = periods.length > 0
 
   return (
     <form onSubmit={submit} className="space-y-4">
       {/* Subject */}
       <div className="space-y-1.5">
-        <label className="text-xs text-gray-500 px-1 font-body block">נושא השיעור</label>
+        <label className="text-xs text-gray-500 px-1 font-body block font-medium">נושא השיעור</label>
         <input
           className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none font-body text-on-surface placeholder-gray-400"
           value={subject}
@@ -1054,9 +1225,175 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
         />
       </div>
 
+      {/* Cart Selection (with Gatekeeper & Conflict Warning) */}
+      <div className="space-y-1.5">
+        <label className="text-xs text-gray-500 px-1 font-body block font-medium flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <span>🛒</span>
+            <span>שריון עגלת מחשבים</span>
+          </span>
+          {checkingConflict && <span className="text-[10px] text-gray-400 animate-pulse">בודק זמינות...</span>}
+        </label>
+
+        {!hasPeriods ? (
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200/70 text-amber-800 text-xs space-y-1 font-body">
+            <div className="font-semibold flex items-center gap-1">
+              <span>⚠️ שריון עגלות מושבת</span>
+            </div>
+            <p className="text-[11px] text-amber-700">
+              טרם הוגדרה מערכת שעות (לוח צלצולים) ע"י מנהל המערכת. פתיחת שיעור תתבצע ללא שריון עגלה ייעודית.
+            </p>
+          </div>
+        ) : (
+          <select
+            value={selectedCartId}
+            onChange={e => setSelectedCartId(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none font-body"
+          >
+            <option value="">ללא שריון עגלה (שיעור רגיל)</option>
+            {carts.map(c => (
+              <option key={c.id} value={c.id}>
+                🛒 {c.name} ({c.total_devices || 0} מחשבים)
+              </option>
+            ))}
+          </select>
+        )}
+
+        {/* Real-time Cart Conflict Warning */}
+        {cartConflict && (
+          <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-body space-y-1">
+            <div className="font-bold flex items-center gap-1">
+              <span>🚫 העגלה תפוסה בשעות אלו!</span>
+            </div>
+            <div className="text-[11px] text-red-600">
+              העגלה שוריינה לשיעור <strong>"{cartConflict.subject || 'שיעור'}"</strong>
+              {cartConflict.teachers?.name ? ` ע"י המורה ${cartConflict.teachers.name}` : ''}
+              {` (בין ${new Date(cartConflict.start_time).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} ל-${new Date(cartConflict.end_time).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}).`}
+            </div>
+            <div className="text-[10px] text-red-500 font-semibold">
+              יש לבחור עגלה אחרת או לשנות את מועד השיעור.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* School Period Shortcut (if periods exist) */}
+      {hasPeriods && (
+        <div className="space-y-1.5">
+          <label className="text-xs text-gray-500 px-1 font-body block font-medium flex items-center gap-1">
+            <span>⏰</span>
+            <span>בחירה לפי שעה במערכת השעות</span>
+          </label>
+          <select
+            value={selectedPeriodId}
+            onChange={e => handlePeriodSelect(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-on-surface focus:ring-1 focus:ring-primary focus:border-primary outline-none font-body"
+          >
+            <option value="">בחירה ידנית / התחלה עכשיו</option>
+            {periods.map(p => (
+              <option key={p.id} value={p.id}>
+                שעה {p.period_number}: {p.name} ({p.start_time.slice(0, 5)} - {p.end_time.slice(0, 5)})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Start Mode Buttons */}
+      <div className="space-y-1.5">
+        <label className="text-xs text-gray-500 px-1 font-body block font-medium">מועד התחלה</label>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            disabled={!!activeLesson}
+            onClick={() => {
+              setStartMode('now')
+              setSelectedPeriodId('')
+            }}
+            title={activeLesson ? `יש לך כבר שיעור פעיל כרגע ("${activeLesson.subject || 'שיעור'}"). כדי לפתוח שיעור מיידי חדש, יש לסיים תחילה את השיעור הנוכחי.` : 'התחל שיעור באופן מיידי'}
+            className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
+              activeLesson
+                ? 'bg-gray-100 border-gray-200 text-gray-400 opacity-60 cursor-not-allowed shadow-inner'
+                : startMode === 'now'
+                ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
+                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+            }`}
+          >
+            ◀️ עכשיו {activeLesson && <span className="text-xs">🚫</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setStartMode('scheduled')}
+            className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
+              startMode === 'scheduled'
+                ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
+                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+            }`}
+          >
+            🕐 תזמון מראש
+          </button>
+        </div>
+        {activeLesson && (
+          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200/60 rounded px-2.5 py-1 font-body flex items-center justify-between">
+            <span className="flex items-center gap-1">
+              <span>🚫 קיים שיעור פעיל:</span>
+              <strong className="font-semibold">{activeLesson.subject || 'שיעור'}</strong>
+              <span className="text-amber-600">(קוד: {activeLesson.lesson_code})</span>
+            </span>
+            <span className="text-[10px] text-amber-600">יש לסיימו לפני פתיחת שיעור מיידי</span>
+          </div>
+        )}
+      </div>
+
+      {/* Scheduled Date & Time */}
+      {startMode === 'scheduled' && (
+        <div className="space-y-3 pt-1">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-gray-400 block mb-1 font-body">תאריך</label>
+              <input
+                type="date"
+                min={todayStr}
+                value={lessonDate}
+                onChange={e => setLessonDate(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-on-surface focus:border-primary outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-gray-400 block mb-1 font-body">שעה</label>
+              <input
+                type="time"
+                value={startTime}
+                onChange={e => {
+                  setStartTime(e.target.value)
+                  setSelectedPeriodId('')
+                }}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-center text-xs font-mono text-on-surface focus:border-primary outline-none"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {QUICK.map(q => (
+              <button key={q.value} type="button"
+                onClick={() => {
+                  setStartTime(q.value)
+                  setSelectedPeriodId('')
+                }}
+                className={`px-3 py-1.5 rounded-full border text-[10px] font-semibold transition-all ${
+                  startTime === q.value
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+                }`}>
+                {q.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Duration */}
       <div className="space-y-1.5">
-        <label className="text-xs text-gray-500 px-1 font-body block">משך זמן (דקות)</label>
+        <label className="text-xs text-gray-500 px-1 font-body block font-medium">משך זמן (דקות)</label>
         <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
           {DURATIONS.map(d => (
             <button key={d} type="button"
@@ -1086,78 +1423,11 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
         </div>
       </div>
 
-      {/* Start Mode Buttons */}
-      <div className="space-y-1.5">
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            disabled={!!activeLesson}
-            onClick={() => setStartMode('now')}
-            title={activeLesson ? `יש לך כבר שיעור פעיל כרגע ("${activeLesson.subject || 'שיעור'}"). כדי לפתוח שיעור מיידי חדש, יש לסיים תחילה את השיעור הנוכחי.` : 'התחל שיעור באופן מיידי'}
-            className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
-              activeLesson
-                ? 'bg-gray-100 border-gray-200 text-gray-400 opacity-60 cursor-not-allowed shadow-inner'
-                : startMode === 'now'
-                ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
-                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
-            }`}
-          >
-            ◀️ עכשיו {activeLesson && <span className="text-xs">🚫</span>}
-          </button>
-          <button
-            type="button"
-            onClick={() => setStartMode('scheduled')}
-            className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
-              startMode === 'scheduled'
-                ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
-                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
-            }`}
-          >
-            🕐 שעה ספציפית
-          </button>
-        </div>
-        {activeLesson && (
-          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200/60 rounded px-2.5 py-1 font-body flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <span>🚫 קיים שיעור פעיל:</span>
-              <strong className="font-semibold">{activeLesson.subject || 'שיעור'}</strong>
-              <span className="text-amber-600">(קוד: {activeLesson.lesson_code})</span>
-            </span>
-            <span className="text-[10px] text-amber-600">יש לסיימו לפני פתיחת שיעור מיידי</span>
-          </div>
-        )}
-      </div>
-
-      {/* Scheduled Time options */}
-      {startMode === 'scheduled' && (
-        <div className="space-y-3 pt-1">
-          <div className="flex flex-wrap gap-2">
-            {QUICK.map(q => (
-              <button key={q.value} type="button"
-                onClick={() => setStartTime(q.value)}
-                className={`px-3 py-1.5 rounded-full border text-[10px] font-semibold transition-all ${
-                  startTime === q.value
-                    ? 'bg-primary text-white border-primary'
-                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
-                }`}>
-                {q.label}
-              </button>
-            ))}
-          </div>
-          <input
-            type="time"
-            value={startTime}
-            onChange={e => setStartTime(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-center text-sm font-mono text-on-surface focus:border-primary outline-none"
-          />
-        </div>
-      )}
-
       {/* Submit Button */}
-      <button type="submit" disabled={saving}
-        className="w-full py-4 bg-primary rounded-lg font-bold text-white transition-all font-headline hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
+      <button type="submit" disabled={saving || !!cartConflict}
+        className="w-full py-4 bg-primary rounded-lg font-bold text-white transition-all font-headline hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
       >
-        {saving ? '⏳ פותח שיעור...' : startMode === 'now' ? 'פתח שיעור' : 'תזמן שיעור'}
+        {saving ? '⏳ פותח שיעור...' : cartConflict ? '🚫 העגלה תפוסה (בחר עגלה/שעה אחרת)' : startMode === 'now' ? 'פתח שיעור' : 'תזמן שיעור'}
       </button>
 
       {onCancel && (
@@ -1257,6 +1527,7 @@ function TeacherDashboard({ teacher, onLogout }) {
   const [lessons,  setLessons]  = useState([])
   const [loading,  setLoading]  = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [prefillBooking, setPrefillBooking] = useState(null)
   const now = useNow()
 
   // Group Management States
@@ -1446,10 +1717,11 @@ function TeacherDashboard({ teacher, onLogout }) {
                 </div>
                 <OpenLessonForm
                   teacher={teacher}
-                  onCreated={() => { load(); setShowForm(false) }}
-                  onCancel={() => setShowForm(false)}
+                  onCreated={() => { load(); setShowForm(false); setPrefillBooking(null) }}
+                  onCancel={() => { setShowForm(false); setPrefillBooking(null) }}
                   activeLesson={active[0] || null}
                   existingLessons={lessons.filter(l => l.status === 'active' || l.status === 'scheduled')}
+                  prefillBooking={prefillBooking}
                 />
               </section>
             )}
@@ -1618,6 +1890,7 @@ function TeacherDashboard({ teacher, onLogout }) {
           <CartAvailabilityExplorer
             teacher={teacher}
             onBookLesson={({ cart, period, date }) => {
+              setPrefillBooking({ cart, period, date })
               setTab('dashboard')
               setShowForm(true)
             }}

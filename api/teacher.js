@@ -50,7 +50,7 @@ export default async function handler(req, res) {
     if (action === 'list') {
       const { data, error } = await supabaseAdmin
         .from('lessons')
-        .select('*, lesson_participants(id, student_id, loan_id, device_id, students(name, class_name), devices(device_number, last_seen))')
+        .select('*, carts(id, name, total_devices), lesson_participants(id, student_id, loan_id, device_id, students(name, class_name), devices(device_number, last_seen))')
         .eq('teacher_id', teacherId)
         .order('created_at', { ascending: false })
         .limit(30)
@@ -74,27 +74,78 @@ export default async function handler(req, res) {
       return res.status(200).json({ lessons })
     }
 
-    // Route 3: Create Lesson
+    // Route 3: Create Lesson (with cart reservation & collision check)
     if (action === 'create') {
       if (!teacherId) return res.status(400).json({ error: 'teacherId is required' })
 
       const durationMins = parseInt(minutes, 10) || 45
       const now = new Date()
-      const endTime = new Date(now.getTime() + durationMins * 60000)
 
-      // Guard: Check if teacher already has an active lesson
-      const { data: activeLessons, error: activeErr } = await supabaseAdmin
-        .from('lessons')
-        .select('id, subject, lesson_code, start_time, end_time')
-        .eq('teacher_id', teacherId)
-        .eq('status', 'active')
-        .gt('end_time', now.toISOString())
+      let startDt = (body.startTime || body.start_time) ? new Date(body.startTime || body.start_time) : now
+      let endDt = (body.endTime || body.end_time) ? new Date(body.endTime || body.end_time) : new Date(startDt.getTime() + durationMins * 60000)
+      const lessonStatus = body.status || (startDt > now ? 'scheduled' : 'active')
+      const cartId = body.cartId || body.cart_id || null
 
-      if (activeLessons && activeLessons.length > 0) {
-        return res.status(400).json({
-          error: 'לא ניתן לפתוח שיעור: קיים כבר שיעור פעיל עבור מורה זה',
-          activeLesson: activeLessons[0]
-        })
+      // Guard: If cart is specified, check prerequisites and conflicts
+      if (cartId) {
+        // 1. Check if school_periods exist (strict prerequisite for cart reservation)
+        const { count: periodCount, error: periodErr } = await supabaseAdmin
+          .from('school_periods')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true)
+
+        if (periodErr || !periodCount || periodCount === 0) {
+          return res.status(400).json({
+            error: 'לא ניתן לשריין עגלה לפני שמערכת השעות (לוח צלצולים) הוגדרה במערכת ע"י מנהל'
+          })
+        }
+
+        // 2. Verify cart exists and is active
+        const { data: cartObj, error: cartErr } = await supabaseAdmin
+          .from('carts')
+          .select('id, name, is_active')
+          .eq('id', cartId)
+          .is('deleted_at', null)
+          .maybeSingle()
+
+        if (cartErr || !cartObj) {
+          return res.status(400).json({ error: 'העגלה שנבחרה אינה קיימת או נמחקה' })
+        }
+
+        // 3. Collision check: No overlapping active or scheduled lesson for this cart
+        const { data: cartConflicts, error: conflictErr } = await supabaseAdmin
+          .from('lessons')
+          .select('id, subject, lesson_code, start_time, end_time, teacher_id, teachers(name)')
+          .eq('cart_id', cartId)
+          .in('status', ['active', 'scheduled'])
+          .lt('start_time', endDt.toISOString())
+          .gt('end_time', startDt.toISOString())
+
+        if (cartConflicts && cartConflicts.length > 0) {
+          const conf = cartConflicts[0]
+          const teacherName = conf.teachers?.name ? ` (המורה ${conf.teachers.name})` : ''
+          return res.status(400).json({
+            error: `העגלה תפוסה לשיעור אחר${teacherName} בשעות אלו`,
+            conflict: conf
+          })
+        }
+      }
+
+      // Guard: Check if teacher already has an active lesson (if starting 'active')
+      if (lessonStatus === 'active') {
+        const { data: activeLessons, error: activeErr } = await supabaseAdmin
+          .from('lessons')
+          .select('id, subject, lesson_code, start_time, end_time')
+          .eq('teacher_id', teacherId)
+          .eq('status', 'active')
+          .gt('end_time', now.toISOString())
+
+        if (activeLessons && activeLessons.length > 0) {
+          return res.status(400).json({
+            error: 'לא ניתן לפתוח שיעור: קיים כבר שיעור פעיל עבור מורה זה',
+            activeLesson: activeLessons[0]
+          })
+        }
       }
 
       let lessonCode
@@ -112,12 +163,13 @@ export default async function handler(req, res) {
           subject: subject || 'שיעור',
           duration_minutes: durationMins,
           lesson_code: lessonCode,
-          start_time: now.toISOString(),
-          end_time: endTime.toISOString(),
-          status: 'active',
+          start_time: startDt.toISOString(),
+          end_time: endDt.toISOString(),
+          status: lessonStatus,
+          cart_id: cartId,
           is_locked: !!isLocked
         })
-        .select('*, teachers(name)')
+        .select('*, teachers(name), carts(id, name, total_devices)')
         .single()
 
       if (error) return res.status(500).json({ error: error.message })
@@ -127,6 +179,9 @@ export default async function handler(req, res) {
     // Route 4: Update Status / Lock / Extension
     if (action === 'update_status' || action === 'update_lesson') {
       const updatePayload = {}
+      if (body.cartId !== undefined || body.cart_id !== undefined) {
+        updatePayload.cart_id = body.cartId !== undefined ? body.cartId : body.cart_id
+      }
       if (status) {
         updatePayload.status = status
         if (status === 'ended') updatePayload.end_time = new Date().toISOString()

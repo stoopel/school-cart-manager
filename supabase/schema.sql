@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS public.lessons (
     start_time               TIMESTAMPTZ DEFAULT now() NOT NULL,
     end_time                 TIMESTAMPTZ NOT NULL,
     status                   text DEFAULT 'active'::text NOT NULL,
+    cart_id                  uuid REFERENCES public.carts(id) ON DELETE SET NULL,
     is_locked                boolean DEFAULT false NOT NULL,
     created_at               TIMESTAMPTZ DEFAULT now() NOT NULL
 );
@@ -548,17 +549,20 @@ SELECT l.id,
     l.start_time,
     l.end_time,
     l.status,
+    l.cart_id,
+    c.name AS cart_name,
     l.is_locked,
     l.teacher_id,
     t.name AS teacher_name,
     (EXTRACT(epoch FROM (l.start_time - now())) / (60)::numeric) AS minutes_until_start,
     (EXTRACT(epoch FROM (l.end_time - now())) / (60)::numeric) AS minutes_remaining,
     count(lp.id) AS participant_count
-   FROM ((lessons l
+   FROM (((lessons l
      LEFT JOIN teachers t ON ((t.id = l.teacher_id)))
+     LEFT JOIN carts c ON ((c.id = l.cart_id)))
      LEFT JOIN lesson_participants lp ON ((lp.lesson_id = l.id)))
   WHERE ((l.status = ANY (ARRAY['active'::text, 'scheduled'::text])) AND (l.end_time > now()))
-  GROUP BY l.id, t.name;
+  GROUP BY l.id, t.name, c.name;
 
 CREATE OR REPLACE VIEW public.unreturned_loans AS
 SELECT dl.id AS loan_id,

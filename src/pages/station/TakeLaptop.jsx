@@ -22,6 +22,7 @@ export default function TakeLaptop({ cart, reservation = null, onDone }) {
   const [bypassError, setBypassError] = useState('')
   const [bypassLoading, setBypassLoading] = useState(false)
   const [isReservedError, setIsReservedError] = useState(false)
+  const [reservedTeacherName, setReservedTeacherName] = useState('')
 
   useEffect(() => {
     if (cart?.allow_manual_entry === false && scanMode !== 'qr') {
@@ -122,29 +123,22 @@ export default function TakeLaptop({ cart, reservation = null, onDone }) {
       const res = await fetch('/api/station', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ route: 'verify-kiosk-code', cartId: cart.id, code: bypassPasscode })
+        body: JSON.stringify({
+          route: 'verify-reservation-bypass',
+          cartId: cart.id,
+          code: bypassPasscode
+        })
       })
       const json = await res.json()
-      let valid = json.isValid
 
-      if (!valid) {
-        const tRes = await fetch('/api/teacher', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'verify', nationalId: bypassPasscode })
-        })
-        const tJson = await tRes.json()
-        if (tJson.isValid) valid = true
-      }
-
-      if (valid) {
+      if (res.ok && json.isValid) {
         const code = bypassPasscode
         setBypassCode(code)
         setShowBypassModal(false)
         setBypassPasscode('')
         confirmId(code)
       } else {
-        setBypassError('קוד אישור חריג או תעודת זהות מורה אינם תקינים.')
+        setBypassError(json.error || 'קוד אישור שגוי. יש להזין קוד מנהל או ת.ז מורה.')
         setBypassPasscode('')
       }
     } catch (err) {

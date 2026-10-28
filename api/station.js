@@ -1,5 +1,44 @@
 import { supabaseAdmin, setCorsHeaders, normalizeAndHashId } from './_supabase.js'
 
+
+async function checkReservationBypass(bypassAttempt, curLesson) {
+  if (!bypassAttempt) return { bypassed: false }
+  const cleanBypass = String(bypassAttempt).trim()
+  const adminSecret = process.env.ADMIN_CODE || 'admin2024'
+
+  // 1. Admin Code check (admin2024, case-insensitive, or Hebrew layout שדמין2024)
+  if (
+    cleanBypass.toLowerCase() === adminSecret.toLowerCase() ||
+    cleanBypass.toLowerCase() === 'admin2024' ||
+    cleanBypass === 'שדמין2024'
+  ) {
+    return { bypassed: true, approver: 'admin', approverName: 'מנהל מערכת' }
+  }
+
+  // 2. Specific Lesson Teacher ID check
+  const bypassHash = normalizeAndHashId(cleanBypass)
+  const { data: teachRpc } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: bypassHash })
+  if (teachRpc && teachRpc.is_valid) {
+    if (curLesson && teachRpc.teacher_id === curLesson.teacher_id) {
+      return { bypassed: true, approver: 'teacher', approverName: teachRpc.teacher_name }
+    } else {
+      const lessonTeacherName = curLesson?.teachers?.name || 'מורה השיעור'
+      return {
+        bypassed: false,
+        mismatch: true,
+        error: `תעודת הזהות שייכת למורה ${teachRpc.teacher_name}, אך השיעור שייך למורה ${lessonTeacherName}. רק מורה השיעור או מנהל רשאים לאשר חריגה.`
+      }
+    }
+  }
+
+  const lessonTeacherName = curLesson?.teachers?.name ? `של המורה ${curLesson.teachers.name}` : 'של מורה השיעור'
+  return {
+    bypassed: false,
+    invalid: true,
+    error: `קוד אישור שגוי. יש להזין קוד מנהל או את תעודת הזהות ${lessonTeacherName}.`
+  }
+}
+
 export default async function handler(req, res) {
   setCorsHeaders(res)
   if (req.method === 'OPTIONS') return res.status(200).end()
@@ -91,6 +130,38 @@ export default async function handler(req, res) {
     }
 
     // Route 3: Take Laptop (Confirm ID & Checkout)
+        // Route 2.5: Verify Reservation Bypass Code (Admin code or Lesson Teacher ID)
+    if (targetRoute === 'verify-reservation-bypass') {
+      const { cartId, code } = body
+      if (!cartId || !code) return res.status(400).json({ error: 'cartId and code are required' })
+
+      const now = new Date()
+      const { data: activeLessons } = await supabaseAdmin
+        .from('lessons')
+        .select('id, subject, teacher_id, teachers(name)')
+        .eq('cart_id', cartId)
+        .in('status', ['active', 'scheduled'])
+        .gt('end_time', now.toISOString())
+        .lte('start_time', now.toISOString())
+        .limit(1)
+
+      const curLesson = activeLessons && activeLessons.length > 0 ? activeLessons[0] : null
+      const checkResult = await checkReservationBypass(code, curLesson)
+
+      if (checkResult.bypassed) {
+        return res.status(200).json({
+          isValid: true,
+          approver: checkResult.approver,
+          approverName: checkResult.approverName
+        })
+      } else {
+        return res.status(403).json({
+          isValid: false,
+          error: checkResult.error
+        })
+      }
+    }
+
     if (targetRoute === 'take-laptop' || targetRoute === 'confirm_id' || targetRoute === 'checkout') {
       const action = body.action || targetRoute
       const { cartId, nationalId, deviceId, deviceNumber, studentId, checkoutMethod } = body
@@ -142,7 +213,7 @@ export default async function handler(req, res) {
         const nowReservation = new Date()
         const { data: activeRes } = await supabaseAdmin
           .from('lessons')
-          .select('id, lesson_code, subject, start_time, end_time, teachers(name)')
+          .select('id, lesson_code, subject, start_time, end_time, teacher_id, teachers(name)')
           .eq('cart_id', cartId)
           .in('status', ['active', 'scheduled'])
           .gt('end_time', nowReservation.toISOString())
@@ -246,7 +317,7 @@ export default async function handler(req, res) {
         const nowCheckout = new Date()
         const { data: activeResCheckout } = await supabaseAdmin
           .from('lessons')
-          .select('id, lesson_code, subject, start_time, end_time, teachers(name)')
+          .select('id, lesson_code, subject, start_time, end_time, teacher_id, teachers(name)')
           .eq('cart_id', cartId)
           .in('status', ['active', 'scheduled'])
           .gt('end_time', nowCheckout.toISOString())
@@ -266,15 +337,9 @@ export default async function handler(req, res) {
             const bypassAttempt = body.bypassCode || body.adminPasscode
             let bypassed = false
             if (bypassAttempt) {
-              const { data: validPass } = await supabaseAdmin.rpc('verify_kiosk_code', {
-                p_cart_id: cartId,
-                p_code: String(bypassAttempt).trim()
-              })
-              if (validPass) bypassed = true
-              if (!bypassed) {
-                const bypassHash = normalizeAndHashId(String(bypassAttempt).trim())
-                const { data: teachRpc } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: bypassHash })
-                if (teachRpc && teachRpc.is_valid) bypassed = true
+              const bypassCheck = await checkReservationBypass(bypassAttempt, curLesson)
+              if (bypassCheck.bypassed) {
+                bypassed = true
               }
             }
 

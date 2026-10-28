@@ -971,6 +971,7 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
   const [selectedCartId, setSelectedCartId] = useState(() => prefillBooking?.cart?.id || '')
   const [selectedPeriodId, setSelectedPeriodId] = useState(() => prefillBooking?.period?.id || '')
   const [cartConflict, setCartConflict] = useState(null)
+  const [isRecurringBooking, setIsRecurringBooking] = useState(false)
   const [checkingConflict, setCheckingConflict] = useState(false)
 
   const [saving, setSaving] = useState(false)
@@ -1180,8 +1181,36 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
       status,
       cart_id:          selectedCartId || null,
     })
+
+    if (error) {
+      setSaving(false)
+      alert('שגיאה: ' + error.message)
+      return
+    }
+
+    // Submit recurring booking request if checked
+    if (isRecurringBooking && selectedCartId && selectedPeriodId) {
+      try {
+        const dayOfWeek = new Date(lessonDate + 'T12:00:00').getDay()
+        await fetch('/api/teacher', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'request_recurring_rule',
+            teacherId: teacher.id,
+            cartId: selectedCartId,
+            dayOfWeek,
+            periodId: selectedPeriodId,
+            subject: subject.trim(),
+            className: className ? className.trim() : null
+          })
+        })
+      } catch (err) {
+        console.error('Error submitting recurring booking request:', err)
+      }
+    }
+
     setSaving(false)
-    if (error) { alert('שגיאה: ' + error.message); return }
     setNewCode(code)
     onCreated()
   }

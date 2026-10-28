@@ -97,11 +97,58 @@ export default async function handler(req, res) {
           lessonCode: l.lesson_code,
           subject: l.subject || 'שיעור',
           teacherName: l.teachers?.name || 'מורה',
+          teacherId: l.teacher_id,
           startTime: l.start_time,
           endTime: l.end_time,
           status: l.status,
           allowedStudentIds,
           hasPreAssignedStudents: allowedStudentIds.length > 0
+        }
+      }
+
+      // Check recurring schedule for today if no explicit lesson reservation found
+      if (!reservation) {
+        const todayDay = now.getDay()
+        const nowTimeStr = now.toTimeString().slice(0, 8)
+        const todayDateStr = now.toISOString().slice(0, 10)
+
+        const { data: activePeriods } = await supabaseAdmin
+          .from('school_periods')
+          .select('id, name, period_number, start_time, end_time')
+          .eq('is_active', true)
+          .lte('start_time', nowTimeStr)
+          .gte('end_time', nowTimeStr)
+          .limit(1)
+
+        if (activePeriods && activePeriods.length > 0) {
+          const curPeriod = activePeriods[0]
+          const { data: recRules } = await supabaseAdmin
+            .from('recurring_lessons_overview')
+            .select('*')
+            .eq('cart_id', cartId)
+            .eq('day_of_week', todayDay)
+            .eq('period_id', curPeriod.id)
+            .eq('status', 'approved')
+            .eq('is_active', true)
+            .limit(1)
+
+          if (recRules && recRules.length > 0) {
+            const r = recRules[0]
+            const periodEndDt = new Date(`${todayDateStr}T${curPeriod.end_time.slice(0, 5)}:00`)
+            reservation = {
+              lessonId: r.id,
+              isRecurring: true,
+              lessonCode: 'קבוע',
+              subject: r.subject || 'שיעור קבוע',
+              teacherName: r.teacher_name || 'מורה',
+              teacherId: r.teacher_id,
+              startTime: `${todayDateStr}T${curPeriod.start_time.slice(0, 5)}:00`,
+              endTime: periodEndDt.toISOString(),
+              status: 'active',
+              allowedStudentIds: [],
+              hasPreAssignedStudents: false
+            }
+          }
         }
       }
 

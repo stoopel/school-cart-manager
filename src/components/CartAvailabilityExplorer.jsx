@@ -10,6 +10,7 @@ export default function CartAvailabilityExplorer({ teacher, onBookLesson, onRefr
   const [periods, setPeriods] = useState([])
   const [carts, setCarts] = useState([])
   const [lessons, setLessons] = useState([])
+  const [recurringRules, setRecurringRules] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -51,6 +52,17 @@ export default function CartAvailabilityExplorer({ teacher, onBookLesson, onRefr
         .lte('start_time', endOfDay)
 
       setLessons(lData || [])
+
+      // 4. Fetch approved recurring rules for this day of week
+      const dayOfWeek = new Date(selectedDate + 'T12:00:00').getDay()
+      const { data: rData } = await supabase
+        .from('recurring_lessons_overview')
+        .select('*')
+        .eq('is_active', true)
+        .eq('status', 'approved')
+        .eq('day_of_week', dayOfWeek)
+
+      setRecurringRules(rData || [])
     } catch (err) {
       console.error('Error loading availability data:', err)
     } finally {
@@ -103,15 +115,36 @@ export default function CartAvailabilityExplorer({ teacher, onBookLesson, onRefr
       return false
     })
 
-    if (!bookedLesson) {
-      return { status: 'free' }
+    if (bookedLesson) {
+      const isMine = teacher && bookedLesson.teacher_id === teacher.id
+      return {
+        status: isMine ? 'mine' : 'occupied',
+        lesson: bookedLesson,
+        isRecurring: false
+      }
     }
 
-    const isMine = teacher && bookedLesson.teacher_id === teacher.id
-    return {
-      status: isMine ? 'mine' : 'occupied',
-      lesson: bookedLesson
+    // Check approved recurring schedule
+    const recRule = recurringRules.find(r => r.cart_id === cartId && r.period_id === period.id)
+    if (recRule) {
+      const isMine = teacher && recRule.teacher_id === teacher.id
+      return {
+        status: isMine ? 'mine' : 'occupied',
+        isRecurring: true,
+        lesson: {
+          id: recRule.id,
+          subject: recRule.subject,
+          teacher_id: recRule.teacher_id,
+          teacher_name: recRule.teacher_name,
+          class_name: recRule.class_name,
+          lesson_code: 'קבוע',
+          start_time: pStartStr,
+          end_time: pEndStr
+        }
+      }
     }
+
+    return { status: 'free' }
   }
 
   return (

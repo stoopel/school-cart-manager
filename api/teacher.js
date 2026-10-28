@@ -241,6 +241,112 @@ export default async function handler(req, res) {
       }
     }
 
+        // Route 7: Recurring Rules (List for Teacher)
+    if (action === 'get_recurring_rules') {
+      let query = supabaseAdmin
+        .from('recurring_lessons_overview')
+        .select('*')
+        .eq('is_active', true)
+        .order('day_of_week')
+        .order('period_number')
+
+      if (teacherId) {
+        query = query.eq('teacher_id', teacherId)
+      }
+
+      const { data: rules, error: rErr } = await query
+      if (rErr) return res.status(500).json({ error: rErr.message })
+      return res.status(200).json({ rules: rules || [] })
+    }
+
+    // Route 8: Request Recurring Weekly Lesson & Cart Booking
+    if (action === 'request_recurring_rule') {
+      const { dayOfWeek, periodId, subject: recSubject, className: recClassName, cartId } = body
+      if (!teacherId) return res.status(400).json({ error: 'teacherId is required' })
+      if (dayOfWeek === undefined || dayOfWeek === null || dayOfWeek < 0 || dayOfWeek > 6) {
+        return res.status(400).json({ error: 'dayOfWeek must be between 0 (Sunday) and 6 (Saturday)' })
+      }
+      if (!periodId) return res.status(400).json({ error: 'periodId is required' })
+      if (!recSubject || !String(recSubject).trim()) return res.status(400).json({ error: 'subject is required' })
+
+      // Verify teacher is active
+      const { data: teacherData, error: teachErr } = await supabaseAdmin
+        .from('teachers')
+        .select('id, name, is_active')
+        .eq('id', teacherId)
+        .maybeSingle()
+      if (teachErr || !teacherData || teacherData.is_active === false) {
+        return res.status(403).json({ error: 'Teacher not found or inactive' })
+      }
+
+      // If cartId is provided, check for collision with approved recurring rules
+      if (cartId) {
+        const { data: existingApproved } = await supabaseAdmin
+          .from('recurring_lesson_rules')
+          .select('id, subject, teacher_id, teachers(name)')
+          .eq('cart_id', cartId)
+          .eq('day_of_week', dayOfWeek)
+          .eq('period_id', periodId)
+          .eq('status', 'approved')
+          .eq('is_active', true)
+          .limit(1)
+
+        if (existingApproved && existingApproved.length > 0) {
+          const owner = existingApproved[0]
+          const teacherName = owner.teachers?.name ? ` (מורה: ${owner.teachers.name})` : ''
+          return res.status(409).json({
+            error: `העגלה כבר משוריינת בקביעות ביום ובשעה שנבחרו עבור "${owner.subject}"${teacherName}. לא ניתן להגיש בקשה כפולה.`,
+            collision: true
+          })
+        }
+      }
+
+      // Insert recurring rule with status 'pending'
+      const { data: newRule, error: insErr } = await supabaseAdmin
+        .from('recurring_lesson_rules')
+        .insert({
+          teacher_id: teacherId,
+          cart_id: cartId || null,
+          day_of_week: dayOfWeek,
+          period_id: periodId,
+          subject: String(recSubject).trim(),
+          class_name: recClassName ? String(recClassName).trim() : null,
+          status: 'pending',
+          is_active: true
+        })
+        .select()
+        .single()
+
+      if (insErr) return res.status(500).json({ error: insErr.message })
+      return res.status(200).json({ success: true, rule: newRule })
+    }
+
+    // Route 9: Delete/Cancel Recurring Rule (Teacher can cancel their own rule)
+    if (action === 'delete_recurring_rule') {
+      const { ruleId } = body
+      if (!ruleId) return res.status(400).json({ error: 'ruleId is required' })
+      if (!teacherId) return res.status(400).json({ error: 'teacherId is required' })
+
+      const { data: rule, error: getErr } = await supabaseAdmin
+        .from('recurring_lesson_rules')
+        .select('id, teacher_id')
+        .eq('id', ruleId)
+        .maybeSingle()
+
+      if (getErr || !rule) return res.status(404).json({ error: 'Rule not found' })
+      if (rule.teacher_id !== teacherId) {
+        return res.status(403).json({ error: 'אינך מורשה לבטל שיעור קבוע שאינו שייך לך' })
+      }
+
+      const { error: delErr } = await supabaseAdmin
+        .from('recurring_lesson_rules')
+        .delete()
+        .eq('id', ruleId)
+
+      if (delErr) return res.status(500).json({ error: delErr.message })
+      return res.status(200).json({ success: true })
+    }
+
     return res.status(400).json({ error: 'Unknown route' })
   } catch (err) {
     console.error('API teacher error:', err)

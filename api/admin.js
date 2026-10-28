@@ -454,6 +454,168 @@ export default async function handler(req, res) {
       }
     }
 
+        // === RECURRING LESSONS SCOPE ==============================
+    if (scope === 'recurring' || action === 'list_recurring' || action === 'approve_recurring' || action === 'reject_recurring' || action === 'toggle_recurring' || action === 'create_recurring' || action === 'delete_recurring') {
+      if (action === 'list' || action === 'list_recurring') {
+        const { data: rules, error: rErr } = await supabaseAdmin
+          .from('recurring_lessons_overview')
+          .select('*')
+          .order('day_of_week')
+          .order('period_number')
+
+        if (rErr) return res.status(500).json({ error: rErr.message })
+        return res.status(200).json({ rules: rules || [] })
+      }
+
+      if (action === 'approve' || action === 'approve_recurring') {
+        const { ruleId, adminNotes } = body
+        if (!ruleId) return res.status(400).json({ error: 'ruleId is required' })
+
+        // 1. Get rule details
+        const { data: targetRule, error: tErr } = await supabaseAdmin
+          .from('recurring_lesson_rules')
+          .select('id, cart_id, day_of_week, period_id, subject')
+          .eq('id', ruleId)
+          .maybeSingle()
+
+        if (tErr || !targetRule) return res.status(404).json({ error: 'Rule not found' })
+
+        // 2. Collision check: if cart is claimed, ensure no other rule is approved for same cart/day/period
+        if (targetRule.cart_id) {
+          const { data: collision } = await supabaseAdmin
+            .from('recurring_lesson_rules')
+            .select('id, subject, teachers(name)')
+            .eq('cart_id', targetRule.cart_id)
+            .eq('day_of_week', targetRule.day_of_week)
+            .eq('period_id', targetRule.period_id)
+            .eq('status', 'approved')
+            .eq('is_active', true)
+            .neq('id', ruleId)
+            .limit(1)
+
+          if (collision && collision.length > 0) {
+            const conflict = collision[0]
+            const teacherName = conflict.teachers?.name ? ` (מורה: ${conflict.teachers.name})` : ''
+            return res.status(409).json({
+              error: `לא ניתן לאשר: קיימת כבר התנגשות! העגלה כבר מאושרת בקביעות במועד זה עבור "${conflict.subject}"${teacherName}.`,
+              collision: true
+            })
+          }
+        }
+
+        const { data: updated, error: uErr } = await supabaseAdmin
+          .from('recurring_lesson_rules')
+          .update({
+            status: 'approved',
+            admin_notes: adminNotes || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', ruleId)
+          .select()
+          .single()
+
+        if (uErr) return res.status(500).json({ error: uErr.message })
+        return res.status(200).json({ success: true, rule: updated })
+      }
+
+      if (action === 'reject' || action === 'reject_recurring') {
+        const { ruleId, adminNotes } = body
+        if (!ruleId) return res.status(400).json({ error: 'ruleId is required' })
+
+        const { data: updated, error: uErr } = await supabaseAdmin
+          .from('recurring_lesson_rules')
+          .update({
+            status: 'rejected',
+            admin_notes: adminNotes || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', ruleId)
+          .select()
+          .single()
+
+        if (uErr) return res.status(500).json({ error: uErr.message })
+        return res.status(200).json({ success: true, rule: updated })
+      }
+
+      if (action === 'toggle_active' || action === 'toggle_recurring') {
+        const { ruleId, isActive } = body
+        if (!ruleId) return res.status(400).json({ error: 'ruleId is required' })
+
+        const { data: updated, error: uErr } = await supabaseAdmin
+          .from('recurring_lesson_rules')
+          .update({
+            is_active: isActive !== false,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', ruleId)
+          .select()
+          .single()
+
+        if (uErr) return res.status(500).json({ error: uErr.message })
+        return res.status(200).json({ success: true, rule: updated })
+      }
+
+      if (action === 'create' || action === 'create_recurring') {
+        const { teacherId: recTeachId, cartId: recCartId, dayOfWeek: recDay, periodId: recPeriod, subject: recSub, className: recCls, status: recStat } = body
+        if (!recTeachId || recDay === undefined || !recPeriod || !recSub) {
+          return res.status(400).json({ error: 'teacherId, dayOfWeek, periodId, subject are required' })
+        }
+
+        const finalStatus = recStat || 'approved'
+        if (finalStatus === 'approved' && recCartId) {
+          const { data: collision } = await supabaseAdmin
+            .from('recurring_lesson_rules')
+            .select('id, subject, teachers(name)')
+            .eq('cart_id', recCartId)
+            .eq('day_of_week', recDay)
+            .eq('period_id', recPeriod)
+            .eq('status', 'approved')
+            .eq('is_active', true)
+            .limit(1)
+
+          if (collision && collision.length > 0) {
+            const conflict = collision[0]
+            const teacherName = conflict.teachers?.name ? ` (מורה: ${conflict.teachers.name})` : ''
+            return res.status(409).json({
+              error: `קיימת התנגשות: העגלה כבר מאושרת בקביעות במועד זה עבור "${conflict.subject}"${teacherName}.`,
+              collision: true
+            })
+          }
+        }
+
+        const { data: created, error: cErr } = await supabaseAdmin
+          .from('recurring_lesson_rules')
+          .insert({
+            teacher_id: recTeachId,
+            cart_id: recCartId || null,
+            day_of_week: recDay,
+            period_id: recPeriod,
+            subject: String(recSub).trim(),
+            class_name: recCls ? String(recCls).trim() : null,
+            status: finalStatus,
+            is_active: true
+          })
+          .select()
+          .single()
+
+        if (cErr) return res.status(500).json({ error: cErr.message })
+        return res.status(200).json({ success: true, rule: created })
+      }
+
+      if (action === 'delete' || action === 'delete_recurring') {
+        const { ruleId } = body
+        if (!ruleId) return res.status(400).json({ error: 'ruleId is required' })
+
+        const { error: dErr } = await supabaseAdmin
+          .from('recurring_lesson_rules')
+          .delete()
+          .eq('id', ruleId)
+
+        if (dErr) return res.status(500).json({ error: dErr.message })
+        return res.status(200).json({ success: true })
+      }
+    }
+
     return res.status(400).json({ error: 'Unknown route' })
   } catch (err) {
     console.error('API admin error:', err)

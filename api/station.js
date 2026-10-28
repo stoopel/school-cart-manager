@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     const body = req.body || {}
     const targetRoute = body.route || body.endpoint || body.action || req.query?.route
 
-    // Route 1: Cart Details & Stats
+    // Route 1: Cart Details & Stats (including lesson reservation info)
     if (targetRoute === 'cart-details') {
       const { cartId } = body
       if (!cartId) return res.status(400).json({ error: 'cartId is required' })
@@ -29,12 +29,51 @@ export default async function handler(req, res) {
         .eq('id', cartId)
         .maybeSingle()
 
+      // Fetch active or imminent lesson reservation for this cart (active now or starting within 10 minutes)
+      const now = new Date()
+      const imminentWindow = new Date(now.getTime() + 10 * 60000)
+
+      const { data: reservedLessons } = await supabaseAdmin
+        .from('lessons')
+        .select('id, lesson_code, subject, start_time, end_time, status, teacher_id, teachers(name)')
+        .eq('cart_id', cartId)
+        .in('status', ['active', 'scheduled'])
+        .gt('end_time', now.toISOString())
+        .lte('start_time', imminentWindow.toISOString())
+        .order('start_time', { ascending: true })
+        .limit(1)
+
+      let reservation = null
+      if (reservedLessons && reservedLessons.length > 0) {
+        const l = reservedLessons[0]
+        const { data: preAssigned } = await supabaseAdmin
+          .from('lesson_pre_assignments')
+          .select('student_id')
+          .eq('lesson_id', l.id)
+
+        const allowedStudentIds = (preAssigned || []).map(p => p.student_id)
+
+        reservation = {
+          lessonId: l.id,
+          lessonCode: l.lesson_code,
+          subject: l.subject || 'שיעור',
+          teacherName: l.teachers?.name || 'מורה',
+          startTime: l.start_time,
+          endTime: l.end_time,
+          status: l.status,
+          allowedStudentIds,
+          hasPreAssignedStudents: allowedStudentIds.length > 0
+        }
+      }
+
       return res.status(200).json({
         cart,
         stats: {
           available: statusData?.available_devices ?? 0,
           taken: statusData?.active_loans ?? 0
-        }
+        },
+        isReserved: !!reservation,
+        reservation
       })
     }
 
@@ -99,6 +138,61 @@ export default async function handler(req, res) {
 
         if (!stu) return res.status(400).json({ error: 'תעודת זהות לא נמצאה במערכת. פנה למורה.' })
 
+        // 2.5 Reservation Check: Is cart currently reserved for a lesson?
+        const nowReservation = new Date()
+        const { data: activeRes } = await supabaseAdmin
+          .from('lessons')
+          .select('id, lesson_code, subject, start_time, end_time, teachers(name)')
+          .eq('cart_id', cartId)
+          .in('status', ['active', 'scheduled'])
+          .gt('end_time', nowReservation.toISOString())
+          .lte('start_time', nowReservation.toISOString())
+          .limit(1)
+
+        if (activeRes && activeRes.length > 0) {
+          const curLesson = activeRes[0]
+          const { data: preAssigned } = await supabaseAdmin
+            .from('lesson_pre_assignments')
+            .select('student_id')
+            .eq('lesson_id', curLesson.id)
+
+          const preList = preAssigned || []
+          if (preList.length > 0) {
+            const isAllowed = preList.some(p => p.student_id === stu.id)
+            if (!isAllowed && !isTeacher) {
+              // Check if valid bypass code was provided
+              let bypassed = false
+              const bypassAttempt = body.bypassCode || body.adminPasscode
+              if (bypassAttempt) {
+                const { data: validPass } = await supabaseAdmin.rpc('verify_kiosk_code', {
+                  p_cart_id: cartId,
+                  p_code: String(bypassAttempt).trim()
+                })
+                if (validPass) bypassed = true
+
+                if (!bypassed) {
+                  const bypassHash = normalizeAndHashId(String(bypassAttempt).trim())
+                  const { data: teachRpc } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: bypassHash })
+                  if (teachRpc && teachRpc.is_valid) bypassed = true
+                }
+              }
+
+              if (!bypassed) {
+                const teacherName = curLesson.teachers?.name ? ` (המורה ${curLesson.teachers.name})` : ''
+                const endTimeStr = new Date(curLesson.end_time).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+                return res.status(403).json({
+                  error: `🔒 עגלה זו משוריינת כעת לשיעור "${curLesson.subject}"${teacherName} (משתחררת בשעה ${endTimeStr}). ההשאלה מורשית רק לתלמידים הרשומים לשיעור זה.`,
+                  code: 'CART_RESERVED_FOR_LESSON',
+                  isReserved: true,
+                  lessonSubject: curLesson.subject,
+                  teacherName: curLesson.teachers?.name,
+                  endTime: curLesson.end_time
+                })
+              }
+            }
+          }
+        }
+
         // 3. Check for existing active loans
         if (!isTeacher) {
           const { data: existing } = await supabaseAdmin
@@ -147,6 +241,53 @@ export default async function handler(req, res) {
 
       if (action === 'checkout') {
         if (!studentId) return res.status(400).json({ error: 'studentId is required' })
+
+        // Reservation check on checkout
+        const nowCheckout = new Date()
+        const { data: activeResCheckout } = await supabaseAdmin
+          .from('lessons')
+          .select('id, lesson_code, subject, start_time, end_time, teachers(name)')
+          .eq('cart_id', cartId)
+          .in('status', ['active', 'scheduled'])
+          .gt('end_time', nowCheckout.toISOString())
+          .lte('start_time', nowCheckout.toISOString())
+          .limit(1)
+
+        if (activeResCheckout && activeResCheckout.length > 0) {
+          const curLesson = activeResCheckout[0]
+          const { data: preAssigned } = await supabaseAdmin
+            .from('lesson_pre_assignments')
+            .select('student_id')
+            .eq('lesson_id', curLesson.id)
+
+          const preList = preAssigned || []
+          if (preList.length > 0) {
+            const isAllowed = preList.some(p => p.student_id === studentId)
+            const bypassAttempt = body.bypassCode || body.adminPasscode
+            let bypassed = false
+            if (bypassAttempt) {
+              const { data: validPass } = await supabaseAdmin.rpc('verify_kiosk_code', {
+                p_cart_id: cartId,
+                p_code: String(bypassAttempt).trim()
+              })
+              if (validPass) bypassed = true
+              if (!bypassed) {
+                const bypassHash = normalizeAndHashId(String(bypassAttempt).trim())
+                const { data: teachRpc } = await supabaseAdmin.rpc('verify_teacher_id', { entered_id: bypassHash })
+                if (teachRpc && teachRpc.is_valid) bypassed = true
+              }
+            }
+
+            if (!isAllowed && !body.isTeacher && !bypassed) {
+              const teacherName = curLesson.teachers?.name ? ` (המורה ${curLesson.teachers.name})` : ''
+              const endTimeStr = new Date(curLesson.end_time).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+              return res.status(403).json({
+                error: `🔒 עגלה זו משוריינת כעת לשיעור "${curLesson.subject}"${teacherName} (משתחררת בשעה ${endTimeStr}). ההשאלה מורשית לתלמידי השיעור בלבד.`,
+                code: 'CART_RESERVED_FOR_LESSON'
+              })
+            }
+          }
+        }
 
         // Check if student is blocked by charge strikes on this cart
         const { data: cartData } = await supabaseAdmin

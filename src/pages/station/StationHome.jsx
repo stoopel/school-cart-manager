@@ -12,6 +12,7 @@ export default function StationHome() {
   const [cartsList, setCartsList] = useState([])
   const [cart, setCart] = useState(null)
   const [stats, setStats] = useState({ available: 0, taken: 0 })
+  const [reservation, setReservation] = useState(null)
   const [mode, setMode] = useState(null)   // null | 'take' | 'return'
   const [clock, setClock] = useState(new Date())
 
@@ -101,6 +102,7 @@ export default function StationHome() {
       if (json.stats) {
         setStats(json.stats)
       }
+      setReservation(json.reservation || null)
 
       // Check LocalStorage auth code
       const auths = JSON.parse(localStorage.getItem('kiosk_auths') || '{}')
@@ -165,6 +167,7 @@ export default function StationHome() {
       const json = await res.json()
       if (json.cart) setCart(json.cart)
       if (json.stats) setStats(json.stats)
+      setReservation(json.reservation || null)
     } catch (err) {
       console.error('Error loading stats:', err)
     }
@@ -421,7 +424,7 @@ export default function StationHome() {
   }
 
   // 4. Cart selected AND Authorized (Show main Kiosk portal)
-  if (mode === 'take')   return <TakeLaptop cart={cart} onDone={onDone} />
+  if (mode === 'take')   return <TakeLaptop cart={cart} reservation={reservation} onDone={onDone} />
   if (mode === 'return') return <ReturnLaptop cart={cart} onDone={onDone} />
 
   return (
@@ -446,6 +449,56 @@ export default function StationHome() {
           <div className="station-date">{dateStr}</div>
         </div>
       </div>
+
+      {/* Reservation Status & Countdown Banner */}
+      {reservation && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(88, 28, 135, 0.45) 0%, rgba(49, 46, 129, 0.45) 100%)',
+          border: '1.5px solid rgba(168, 85, 247, 0.45)',
+          borderRadius: 16,
+          padding: '16px 24px',
+          margin: '0 24px 16px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 16,
+          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)',
+          backdropFilter: 'blur(8px)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <span style={{ fontSize: '2rem' }}>🔒</span>
+            <div>
+              <div style={{ color: '#fff', fontWeight: 800, fontSize: '1.15rem' }}>
+                עגלה זו משוריינת כעת לשיעור "{reservation.subject}" (המורה {reservation.teacherName})
+              </div>
+              <div style={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: '0.85rem', marginTop: 3 }}>
+                {reservation.hasPreAssignedStudents
+                  ? 'ההשאלה מוגבלת לתלמידי השיעור הרשומים בלבד (או באישור מנהל/מורה)'
+                  : 'עגלה תפוסה לשיעור פעיל'}
+              </div>
+            </div>
+          </div>
+          <div style={{
+            background: 'rgba(0, 0, 0, 0.4)',
+            border: '1px solid rgba(168, 85, 247, 0.4)',
+            borderRadius: 12,
+            padding: '8px 18px',
+            textAlign: 'center',
+            minWidth: 160
+          }}>
+            <div style={{ fontSize: '0.75rem', color: '#c084fc', fontWeight: 700, letterSpacing: '0.5px' }}>
+              מועד שחרור העגלה
+            </div>
+            <div style={{ fontSize: '1.25rem', color: '#fff', fontWeight: 800, marginTop: 2 }}>
+              {new Date(reservation.endTime).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: '#e9d5ff', fontWeight: 500 }}>
+              בעוד {Math.max(1, Math.ceil((new Date(reservation.endTime).getTime() - clock.getTime()) / 60000))} דקות
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main */}
       <div className="station-main">

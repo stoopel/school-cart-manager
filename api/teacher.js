@@ -76,9 +76,27 @@ export default async function handler(req, res) {
 
     // Route 3: Create Lesson
     if (action === 'create') {
+      if (!teacherId) return res.status(400).json({ error: 'teacherId is required' })
+
       const durationMins = parseInt(minutes, 10) || 45
       const now = new Date()
       const endTime = new Date(now.getTime() + durationMins * 60000)
+
+      // Guard: Check if teacher already has an active lesson
+      const { data: activeLessons, error: activeErr } = await supabaseAdmin
+        .from('lessons')
+        .select('id, subject, lesson_code, start_time, end_time')
+        .eq('teacher_id', teacherId)
+        .eq('status', 'active')
+        .gt('end_time', now.toISOString())
+
+      if (activeLessons && activeLessons.length > 0) {
+        return res.status(400).json({
+          error: 'לא ניתן לפתוח שיעור: קיים כבר שיעור פעיל עבור מורה זה',
+          activeLesson: activeLessons[0]
+        })
+      }
+
       let lessonCode
       const { data: generatedCode, error: codeErr } = await supabaseAdmin.rpc('generate_lesson_code')
       if (!codeErr && generatedCode) {

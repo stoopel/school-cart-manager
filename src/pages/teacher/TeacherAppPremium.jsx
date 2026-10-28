@@ -939,12 +939,12 @@ function PreAssignModal({ lesson, teacher, onClose, onRefresh }) {
 }
 
 // ── Open Lesson Form ───────────────────────────────────────────
-function OpenLessonForm({ teacher, onCreated, onCancel }) {
+function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, existingLessons = [] }) {
   const DURATIONS = [30, 45, 60, 90]
   const [subject,  setSubject]  = useState('')
   const [presetDuration, setPresetDuration] = useState(45)
   const [customDuration, setCustomDuration] = useState('')
-  const [startMode, setStartMode] = useState('now') // 'now' | 'scheduled'
+  const [startMode, setStartMode] = useState(activeLesson ? 'scheduled' : 'now') // 'now' | 'scheduled'
   const [startTime, setStartTime] = useState(() => {
     const d = new Date(); d.setMinutes(d.getMinutes() + 45, 0, 0)
     return d.toTimeString().slice(0, 5)
@@ -973,6 +973,41 @@ function OpenLessonForm({ teacher, onCreated, onCancel }) {
     const durationVal = customDuration ? Math.max(1, Number(customDuration) || 0) : presetDuration
     const endDt = new Date(startDt.getTime() + durationVal * 60000)
     const status = startMode === 'now' ? 'active' : 'scheduled'
+
+    if (startMode === 'now' && activeLesson) {
+      alert(`יש לך כבר שיעור פעיל כעת ("${activeLesson.subject || 'שיעור'}"). יש לסיים אותו תחילה לפני פתיחת שיעור חדש.`)
+      setSaving(false)
+      return
+    }
+
+    if (startMode === 'scheduled') {
+      const nowTs = Date.now()
+      const newStartTs = startDt.getTime()
+      const newEndTs = endDt.getTime()
+
+      if (newEndTs <= nowTs) {
+        alert('זמן סיום השיעור חייב להיות בעתיד.')
+        setSaving(false)
+        return
+      }
+
+      // Check collision with any existing active or scheduled lesson
+      const conflict = existingLessons.find(l => {
+        const lStart = new Date(l.start_time).getTime()
+        const lEnd = new Date(l.end_time).getTime()
+        return newStartTs < lEnd && newEndTs > lStart
+      })
+
+      if (conflict) {
+        const confStart = new Date(conflict.start_time).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+        const confEnd = new Date(conflict.end_time).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+        const confSubj = conflict.subject || 'שיעור'
+        const confType = conflict.status === 'active' ? 'השיעור הפעיל כעת' : 'שיעור מתוכנן'
+        alert(`לא ניתן לתזמן שיעור: קיימת חפיפה עם ${confType} ("${confSubj}", בין ${confStart} ל-${confEnd}). אנא בחר שעה אחרת.`)
+        setSaving(false)
+        return
+      }
+    }
 
     const { error } = await supabase.from('lessons').insert({
       teacher_id:       teacher.id,
@@ -1050,29 +1085,45 @@ function OpenLessonForm({ teacher, onCreated, onCancel }) {
       </div>
 
       {/* Start Mode Buttons */}
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => setStartMode('now')}
-          className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
-            startMode === 'now'
-              ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
-              : 'bg-gray-50 border-gray-200 text-gray-500'
-          }`}
-        >
-          ◀️ עכשיו
-        </button>
-        <button
-          type="button"
-          onClick={() => setStartMode('scheduled')}
-          className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
-            startMode === 'scheduled'
-              ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
-              : 'bg-gray-50 border-gray-200 text-gray-500'
-          }`}
-        >
-          🕐 שעה ספציפית
-        </button>
+      <div className="space-y-1.5">
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            disabled={!!activeLesson}
+            onClick={() => setStartMode('now')}
+            title={activeLesson ? `יש לך כבר שיעור פעיל כרגע ("${activeLesson.subject || 'שיעור'}"). כדי לפתוח שיעור מיידי חדש, יש לסיים תחילה את השיעור הנוכחי.` : 'התחל שיעור באופן מיידי'}
+            className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
+              activeLesson
+                ? 'bg-gray-100 border-gray-200 text-gray-400 opacity-60 cursor-not-allowed shadow-inner'
+                : startMode === 'now'
+                ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
+                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+            }`}
+          >
+            ◀️ עכשיו {activeLesson && <span className="text-xs">🚫</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setStartMode('scheduled')}
+            className={`flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-body transition-all border ${
+              startMode === 'scheduled'
+                ? 'bg-primary-container/10 border-primary-container text-primary font-semibold'
+                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+            }`}
+          >
+            🕐 שעה ספציפית
+          </button>
+        </div>
+        {activeLesson && (
+          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200/60 rounded px-2.5 py-1 font-body flex items-center justify-between">
+            <span className="flex items-center gap-1">
+              <span>🚫 קיים שיעור פעיל:</span>
+              <strong className="font-semibold">{activeLesson.subject || 'שיעור'}</strong>
+              <span className="text-amber-600">(קוד: {activeLesson.lesson_code})</span>
+            </span>
+            <span className="text-[10px] text-amber-600">יש לסיימו לפני פתיחת שיעור מיידי</span>
+          </div>
+        )}
       </div>
 
       {/* Scheduled Time options */}
@@ -1385,6 +1436,8 @@ function TeacherDashboard({ teacher, onLogout }) {
                   teacher={teacher}
                   onCreated={() => { load(); setShowForm(false) }}
                   onCancel={() => setShowForm(false)}
+                  activeLesson={active[0] || null}
+                  existingLessons={lessons.filter(l => l.status === 'active' || l.status === 'scheduled')}
                 />
               </section>
             )}

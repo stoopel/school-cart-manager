@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import CartAvailabilityExplorer from '../../components/CartAvailabilityExplorer'
+
 
 // ── Helpers ───────────────────────────────────────────────────
 function fmtCountdown(seconds) {
@@ -375,7 +377,7 @@ function LessonCard({ lesson, teacher, now, onRefresh, allStudents = [] }) {
                 dotTitle = 'מחובר ופעיל כעת' 
               } else if (isOffline) { 
                 dotBg = 'bg-amber-400 shadow-sm shadow-amber-200' 
-                dotTitle = 'מחשב כבוי / נותק מעל 2 דק\'' 
+                dotTitle = "מחשב כבוי / נותק מעל 2 דק'" 
               }
 
               return (
@@ -1415,7 +1417,17 @@ function TeacherDashboard({ teacher, onLogout }) {
       </header>
 
       {/* Content */}
-      <main className="px-5 pt-4 pb-20 max-w-md mx-auto space-y-6">
+      <main className={`px-5 pt-4 pb-20 mx-auto space-y-6 ${tab === 'carts' ? 'max-w-5xl' : 'max-w-md'}`}>
+            {!showForm && tab === 'dashboard' && (
+              <button
+                type="button"
+                onClick={() => setTab('carts')}
+                className="w-full py-2.5 bg-white border border-primary/30 text-primary rounded-lg font-semibold text-xs transition-all font-headline hover:bg-primary/5 flex items-center justify-center gap-2 shadow-sm mb-1"
+              >
+                <span className="material-symbols-outlined text-base">calendar_month</span>
+                <span>צפה בלוח זמינות עגלות לפי מערכת השעות</span>
+              </button>
+            )}
         {tab === 'dashboard' ? (
           <>
             {/* Open new lesson card */}
@@ -1484,7 +1496,7 @@ function TeacherDashboard({ teacher, onLogout }) {
               </div>
             )}
           </>
-        ) : (
+        ) : tab === 'groups' ? (
           <div className="space-y-6">
             {/* Manage Groups Header & Create Button */}
             <div className="flex justify-between items-center">
@@ -1602,6 +1614,15 @@ function TeacherDashboard({ teacher, onLogout }) {
               </div>
             )}
           </div>
+        ) : (
+          <CartAvailabilityExplorer
+            teacher={teacher}
+            onBookLesson={({ cart, period, date }) => {
+              setTab('dashboard')
+              setShowForm(true)
+            }}
+            onRefreshLessons={load}
+          />
         )}
       </main>
 
@@ -1690,6 +1711,13 @@ function TeacherDashboard({ teacher, onLogout }) {
         >
           <span className="material-symbols-outlined text-2xl">dashboard</span>
           <span className="text-[10px] font-medium font-body">ראשי</span>
+        </button>
+        <button 
+          onClick={() => setTab('carts')} 
+          className={`flex flex-col items-center gap-1 transition-colors ${tab === 'carts' ? 'text-primary font-bold' : 'text-gray-400 hover:text-gray-600'}`}
+        >
+          <span className="material-symbols-outlined text-2xl">calendar_month</span>
+          <span className="text-[10px] font-medium font-body">זמינות עגלות</span>
         </button>
         <button 
           onClick={() => setTab('groups')} 

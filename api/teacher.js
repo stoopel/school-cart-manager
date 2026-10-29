@@ -301,7 +301,8 @@ export default async function handler(req, res) {
         }
       }
 
-      // Insert recurring rule with status 'pending'
+      // Insert recurring rule with status 'pending' and pre-allocated lesson code
+      const { data: gCode } = await supabaseAdmin.rpc('generate_lesson_code')
       const { data: newRule, error: insErr } = await supabaseAdmin
         .from('recurring_lesson_rules')
         .insert({
@@ -312,6 +313,7 @@ export default async function handler(req, res) {
           subject: String(recSubject).trim(),
           class_name: recClassName ? String(recClassName).trim() : null,
           status: 'pending',
+          lesson_code: gCode,
           is_active: true
         })
         .select()

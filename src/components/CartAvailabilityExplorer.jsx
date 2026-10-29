@@ -137,7 +137,7 @@ export default function CartAvailabilityExplorer({ teacher, onBookLesson, onRefr
           teacher_id: recRule.teacher_id,
           teacher_name: recRule.teacher_name,
           class_name: recRule.class_name,
-          lesson_code: 'קבוע',
+          lesson_code: recRule.lesson_code || 'קבוע',
           start_time: pStartStr,
           end_time: pEndStr
         }
@@ -334,7 +334,7 @@ export default function CartAvailabilityExplorer({ teacher, onBookLesson, onRefr
                                       {l.subject || 'השיעור שלי'}
                                     </span>
                                     <span className="text-[10px] bg-indigo-200/70 text-indigo-900 px-1.5 py-0.5 rounded font-mono font-bold">
-                                      {l.lesson_code}
+                                      {cell.isRecurring ? `🔄 ${l.lesson_code}` : l.lesson_code}
                                     </span>
                                   </div>
                                   <div className="text-[10px] text-indigo-700">

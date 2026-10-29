@@ -474,7 +474,7 @@ export default async function handler(req, res) {
         // 1. Get rule details
         const { data: targetRule, error: tErr } = await supabaseAdmin
           .from('recurring_lesson_rules')
-          .select('id, cart_id, day_of_week, period_id, subject')
+          .select('id, cart_id, day_of_week, period_id, subject, lesson_code')
           .eq('id', ruleId)
           .maybeSingle()
 
@@ -503,10 +503,17 @@ export default async function handler(req, res) {
           }
         }
 
+        let ruleCode = targetRule.lesson_code
+        if (!ruleCode) {
+          const { data: gCode } = await supabaseAdmin.rpc('generate_lesson_code')
+          ruleCode = gCode
+        }
+
         const { data: updated, error: uErr } = await supabaseAdmin
           .from('recurring_lesson_rules')
           .update({
             status: 'approved',
+            lesson_code: ruleCode,
             admin_notes: adminNotes || null,
             updated_at: new Date().toISOString()
           })
@@ -583,6 +590,7 @@ export default async function handler(req, res) {
           }
         }
 
+        const { data: gCode } = await supabaseAdmin.rpc('generate_lesson_code')
         const { data: created, error: cErr } = await supabaseAdmin
           .from('recurring_lesson_rules')
           .insert({
@@ -593,6 +601,7 @@ export default async function handler(req, res) {
             subject: String(recSub).trim(),
             class_name: recCls ? String(recCls).trim() : null,
             status: finalStatus,
+            lesson_code: gCode,
             is_active: true
           })
           .select()

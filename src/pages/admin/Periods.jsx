@@ -891,9 +891,21 @@ export default function Periods() {
 
                         <td style={{ padding: '14px 18px' }}>
                           <strong style={{ color: '#fff', display: 'block', fontSize: '0.95rem' }}>{rule.subject}</strong>
-                          {rule.class_name && (
-                            <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>כיתה: {rule.class_name}</span>
-                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                            {rule.class_name && (
+                              <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>כיתה: {rule.class_name}</span>
+                            )}
+                            {rule.lesson_code && (
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)',
+                                color: '#38bdf8', padding: '1px 8px', borderRadius: 6,
+                                fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem'
+                              }}>
+                                🔑 {rule.lesson_code}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         <td style={{ padding: '14px 18px' }}>

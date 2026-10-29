@@ -306,9 +306,90 @@ export default async function handler(req, res) {
 
       if (action === 'get_by_code') {
         const { data: rows } = await supabaseAdmin.from('active_lessons').select('*').eq('lesson_code', lessonCode)
-        if (!rows || rows.length === 0) return res.status(200).json({ lesson: null })
-        const { data: serverNow } = await supabaseAdmin.rpc('get_server_time')
-        return res.status(200).json({ lesson: rows[0], server_now: serverNow })
+        if (rows && rows.length > 0) {
+          const { data: serverNow } = await supabaseAdmin.rpc('get_server_time')
+          return res.status(200).json({ lesson: rows[0], server_now: serverNow })
+        }
+
+        // Check if lessonCode belongs to an approved recurring lesson scheduled for right now
+        const now = new Date()
+        const todayDay = now.getDay()
+        const todayDateStr = now.toISOString().slice(0, 10)
+
+        const { data: recRules } = await supabaseAdmin
+          .from('recurring_lessons_overview')
+          .select('*')
+          .eq('lesson_code', lessonCode)
+          .eq('day_of_week', todayDay)
+          .eq('status', 'approved')
+          .eq('is_active', true)
+          .limit(1)
+
+        if (recRules && recRules.length > 0) {
+          const r = recRules[0]
+          const pStartStr = `${todayDateStr}T${r.start_time.slice(0, 5)}:00`
+          const pEndStr = `${todayDateStr}T${r.end_time.slice(0, 5)}:00`
+          const pStartTs = new Date(pStartStr).getTime() - 10 * 60000 // 10 min pre-lesson window
+          const pEndTs = new Date(pEndStr).getTime()
+          const nowTs = now.getTime()
+
+          if (nowTs >= pStartTs && nowTs <= pEndTs) {
+            // Find existing active lesson or auto-instantiate
+            const { data: existingLesson } = await supabaseAdmin
+              .from('lessons')
+              .select('id, lesson_code, subject, duration_minutes, start_time, end_time, is_locked, teacher_id, teachers(name)')
+              .eq('lesson_code', lessonCode)
+              .in('status', ['active', 'scheduled'])
+              .gte('end_time', now.toISOString())
+              .maybeSingle()
+
+            let curLesson = existingLesson
+            if (!curLesson) {
+              const [sh, sm] = r.start_time.split(':').map(Number)
+              const [eh, em] = r.end_time.split(':').map(Number)
+              const dur = Math.max(30, (eh * 60 + em) - (sh * 60 + sm))
+
+              const { data: created, error: insErr } = await supabaseAdmin
+                .from('lessons')
+                .insert({
+                  teacher_id: r.teacher_id,
+                  lesson_code: r.lesson_code,
+                  subject: r.subject,
+                  duration_minutes: dur,
+                  start_time: new Date(pStartStr).toISOString(),
+                  end_time: new Date(pEndStr).toISOString(),
+                  status: 'active',
+                  cart_id: r.cart_id || null,
+                  is_locked: false
+                })
+                .select('id, lesson_code, subject, duration_minutes, start_time, end_time, is_locked, teacher_id')
+                .single()
+
+              if (!insErr && created) {
+                curLesson = { ...created, teachers: { name: r.teacher_name } }
+              }
+            }
+
+            if (curLesson) {
+              const { data: serverNow } = await supabaseAdmin.rpc('get_server_time')
+              const formattedLesson = {
+                id: curLesson.id,
+                lesson_code: curLesson.lesson_code,
+                subject: curLesson.subject,
+                duration_minutes: curLesson.duration_minutes,
+                start_time: curLesson.start_time,
+                end_time: curLesson.end_time,
+                is_locked: curLesson.is_locked,
+                teacher_name: r.teacher_name,
+                minutes_remaining: Math.max(0, Math.floor((new Date(curLesson.end_time).getTime() - nowTs) / 60000)),
+                participant_count: 0
+              }
+              return res.status(200).json({ lesson: formattedLesson, server_now: serverNow })
+            }
+          }
+        }
+
+        return res.status(200).json({ lesson: null })
       }
 
       if (action === 'get_by_id') {

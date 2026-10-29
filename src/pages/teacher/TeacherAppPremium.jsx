@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import CartAvailabilityExplorer from '../../components/CartAvailabilityExplorer'
 
@@ -1202,7 +1202,7 @@ function OpenLessonForm({ teacher, onCreated, onCancel, activeLesson = null, exi
             dayOfWeek,
             periodId: selectedPeriodId,
             subject: subject.trim(),
-            className: className ? className.trim() : null
+            className: null
           })
         })
       } catch (err) {
